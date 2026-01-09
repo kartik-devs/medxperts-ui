@@ -1,0 +1,34 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Prevent horizontal scrollbars */
+html, body {
+  overflow-x: hidden;
+}
+
+/* Custom scrollbar styles for better UX */
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* Custom styles can be added below */
+body {
+  font-family: 'Inter', sans-serif;
+  @apply text-gray-900;
+}
+
+/* Add any additional global styles here */
