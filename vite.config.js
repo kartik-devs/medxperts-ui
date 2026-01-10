@@ -8,6 +8,11 @@ export default defineConfig({
     host: true,
     port: process.env.PORT || 4173,
     strictPort: false,
+    allowedHosts: [
+      'medxperts-frountend.onrender.com',
+      'medxperts-frontend.onrender.com',
+      '.onrender.com'
+    ]
   },
   server: {
     host: true,
