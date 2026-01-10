@@ -56,20 +56,30 @@ const Register = () => {
       
       console.log('User created:', user);
       
-      // Set a timeout before sending verification to ensure user is properly created
-      setTimeout(async () => {
-        try {
-          await sendEmailVerification(user, {
-            url: window.location.origin + '/login',
-            handleCodeInApp: false
-          });
-          console.log('Verification email sent successfully');
-          setMessage('Verification email sent! Please check your email (including spam folder).');
-        } catch (verificationError) {
-          console.error('Email verification error:', verificationError);
-          setMessage('Account created! Please log in and check your email for verification.');
+      // Send verification email
+      try {
+        await sendEmailVerification(user, {
+          url: window.location.origin + '/login',
+          handleCodeInApp: false
+        });
+        console.log('✅ Verification email sent successfully to:', user.email);
+        setMessage(`✅ Account created! Verification email sent to ${user.email}. Please check your inbox and spam folder.`);
+      } catch (verificationError) {
+        console.error('❌ Email verification error:', verificationError);
+        console.error('Error code:', verificationError.code);
+        console.error('Error message:', verificationError.message);
+        
+        let verificationErrorMsg = 'Account created but failed to send verification email. ';
+        if (verificationError.code === 'auth/too-many-requests') {
+          verificationErrorMsg += 'Too many requests. Please try logging in and resending from your profile.';
+        } else if (verificationError.code === 'auth/invalid-email') {
+          verificationErrorMsg += 'Invalid email address.';
+        } else {
+          verificationErrorMsg += `Error: ${verificationError.message}`;
         }
-      }, 1000); // 1 second delay
+        
+        setError(verificationErrorMsg);
+      }
       
       // Sign out the user
       await auth.signOut();
