@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Upload, X, CheckCircle2, Copy, ChevronDown, Zap } from 'lucide-react';
-//import { searchCaseIds, addCaseToLocalStorage, getAllCaseIds, testAPIConnection } from '../../contexts/search-case';
+import { searchCaseIds, addCaseToLocalStorage, getAllCaseIds, testAPIConnection } from '../../contexts/search-case';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || '';
 

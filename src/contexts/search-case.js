@@ -21,11 +21,10 @@ function getCurrentUserEmail() {
   // For now, we'll get it from localStorage or a global state
   const userEmail = localStorage.getItem('userEmail') || 
                    sessionStorage.getItem('userEmail') ||
-                   window.currentUserEmail ||
-                   'test@gmail.com'; // Default for testing
+                   window.currentUserEmail;
   
-  if (!userEmail || userEmail === 'test@gmail.com') {
-    console.warn('⚠️ Using test email. Please ensure user is properly logged in.');
+  if (!userEmail) {
+    throw new Error('User not authenticated. Please log in first.');
   }
   
   return userEmail;

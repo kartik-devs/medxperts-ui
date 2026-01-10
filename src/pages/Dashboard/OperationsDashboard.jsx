@@ -688,7 +688,7 @@ const OperationsDashboard = () => {
                         navigate('/mcp-progress');
                       } else {
                         // Check if there are any processing reports in the report history
-                        const response = await fetch(`${import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001'}/api/report-history?gmailId=${localStorage.getItem('userEmail') || 'test@gmail.com'}`);
+                        const response = await fetch(`${import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001'}/api/report-history?gmailId=${localStorage.getItem('userEmail') || ''}`);
                         
                         if (response.ok) {
                           const data = await response.json();
