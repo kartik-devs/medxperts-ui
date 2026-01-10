@@ -1,7 +1,6 @@
 import express from 'express';
 import cors from 'cors';
 import multer from 'multer';
-import FormData from 'form-data';
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -12,7 +11,15 @@ const PORT = process.env.PORT || 3001;
 // Middleware
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
-app.use(cors());
+
+// CORS configuration for production
+const corsOptions = {
+  origin: process.env.NODE_ENV === 'production' 
+    ? ['https://medxperts-frontend.onrender.com', 'https://medxperts-ui.onrender.com']
+    : '*',
+  credentials: true
+};
+app.use(cors(corsOptions));
 
 // Multer for file uploads
 const upload = multer({
@@ -120,7 +127,33 @@ app.post('/api/trigger-workflow', async (req, res) => {
   }
 });
 
-// Health check
+// Health check endpoints
+app.get('/api/health', (req, res) => {
+  const healthCheck = {
+    status: 'healthy',
+    uptime: process.uptime(),
+    timestamp: new Date().toISOString(),
+    service: 'N8N Backend API',
+    version: '1.0.0',
+    environment: process.env.NODE_ENV || 'development',
+    memory: {
+      used: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
+      total: Math.round(process.memoryUsage().heapTotal / 1024 / 1024),
+      unit: 'MB'
+    },
+    endpoints: {
+      upload: '/api/upload-files',
+      workflow: '/api/trigger-workflow',
+      reports: '/api/report-history',
+      search: '/api/search-cases',
+      mcpGenerate: '/api/mcp-generate'
+    }
+  };
+  
+  res.status(200).json(healthCheck);
+});
+
+// Legacy test endpoint (kept for backward compatibility)
 app.get('/api/test', (req, res) => {
   res.json({
     message: 'N8N Backend API is running!',
@@ -209,7 +242,25 @@ app.post('/api/mcp-generate', (req, res) => {
   res.json({ success: true, caseId, message: 'MCP generation started' });
 });
 
-// Start server
-app.listen(PORT, () => {
+// Start server with error handling
+const server = app.listen(PORT, () => {
   console.log(`🚀 N8N Backend running on port ${PORT}`);
+  console.log(`📊 Health check: http://localhost:${PORT}/api/health`);
+  console.log(`🧪 Test endpoint: http://localhost:${PORT}/api/test`);
+});
+
+// Graceful shutdown
+process.on('SIGTERM', () => {
+  console.log('SIGTERM signal received: closing HTTP server');
+  server.close(() => {
+    console.log('HTTP server closed');
+  });
+});
+
+process.on('SIGINT', () => {
+  console.log('\nSIGINT signal received: closing HTTP server');
+  server.close(() => {
+    console.log('HTTP server closed');
+    process.exit(0);
+  });
 });

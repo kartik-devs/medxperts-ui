@@ -11,9 +11,8 @@ const isLocalhost =
   typeof window !== 'undefined' &&
   (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
 
-const API_BASE_URL = isLocalhost
-  ? window.location.origin
-  : (viteApiBaseUrl || window.location.origin);
+// Use VITE_API_BASE_URL if set, otherwise fall back to window.location.origin
+const API_BASE_URL = viteApiBaseUrl || window.location.origin;
 
 // Get current user email from Firebase auth
 function getCurrentUserEmail() {
