@@ -15,7 +15,7 @@ app.use(express.urlencoded({ limit: '50mb', extended: true }));
 // CORS configuration for production
 const corsOptions = {
   origin: process.env.NODE_ENV === 'production' 
-    ? ['https://medxperts-frontend.onrender.com', 'https://medxperts-ui.onrender.com']
+    ? ['https://medxperts-frountend.onrender.com', 'https://medxperts-frontend.onrender.com', 'https://medxperts-ui.onrender.com']
     : '*',
   credentials: true
 };
