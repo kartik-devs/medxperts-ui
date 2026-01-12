@@ -133,32 +133,115 @@ const CACHE_DURATION = 5 * 60 * 1000;
 
 async function fetchUserPermissions() {
   try {
-    console.log('Fetching user permissions from S3...');
-    const command = new GetObjectCommand({ Bucket: 'finallcpreports', Key: 'user info1.xlsx' });
+    console.log('📊 Fetching user permissions from S3 Excel file...');
+    
+    const command = new GetObjectCommand({ 
+      Bucket: 'finallcpreports', 
+      Key: 'user info1.xlsx' 
+    });
+    
     const response = await s3.send(command);
     const chunks = [];
-    for await (const chunk of response.Body) { chunks.push(chunk); }
+    
+    for await (const chunk of response.Body) { 
+      chunks.push(chunk); 
+    }
+    
     const buffer = Buffer.concat(chunks);
     const workbook = xlsx.read(buffer, { type: 'buffer' });
-    const data = xlsx.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]);
+    const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+    const data = xlsx.utils.sheet_to_json(worksheet);
+    
+    console.log(`📋 Processing ${data.length} rows from Excel file`);
+    
     const userPermissions = {};
-    data.forEach(row => {
-      const gmailId = row['Gmail ID'] || row['gmail_id'] || row['email'];
-      const caseId = row['Case ID'] || row['case_id'];
+    let processedRows = 0;
+    let skippedRows = 0;
+    
+    data.forEach((row, index) => {
+      // Try different possible column names for Gmail ID
+      const gmailId = row['Gmail ID'] || 
+                     row['gmail_id'] || 
+                     row['email'] || 
+                     row['Email'] || 
+                     row['Gmail'] ||
+                     row['User Email'] ||
+                     row['user_email'];
+      
+      // Try different possible column names for Case ID
+      const caseId = row['Case ID'] || 
+                     row['case_id'] || 
+                     row['CaseID'] ||
+                     row['Case Id'] ||
+                     row['ID'] ||
+                     row['id'];
+      
       if (gmailId && caseId) {
-        const email = gmailId.toLowerCase().trim();
+        const email = gmailId.toString().toLowerCase().trim();
         let pid = caseId.toString().trim();
+        
+        // Validate and normalize case ID (1-4 digits)
         if (/^\d{1,4}$/.test(pid)) {
           pid = pid.padStart(4, '0');
-          if (!userPermissions[email]) userPermissions[email] = [];
-          userPermissions[email].push(pid);
+          
+          if (!userPermissions[email]) {
+            userPermissions[email] = [];
+          }
+          
+          // Avoid duplicates
+          if (!userPermissions[email].includes(pid)) {
+            userPermissions[email].push(pid);
+          }
+          
+          processedRows++;
+        } else {
+          console.warn(`⚠️ Invalid case ID format in row ${index + 1}: "${pid}"`);
+          skippedRows++;
         }
+      } else {
+        console.warn(`⚠️ Missing Gmail ID or Case ID in row ${index + 1}:`, {
+          gmailId: gmailId || 'MISSING',
+          caseId: caseId || 'MISSING'
+        });
+        skippedRows++;
       }
     });
-    userPermissionsCache.set('permissions', { data: userPermissions, timestamp: Date.now() });
+    
+    console.log(`✅ Excel processing complete:`);
+    console.log(`   📊 Total rows: ${data.length}`);
+    console.log(`   ✅ Processed: ${processedRows}`);
+    console.log(`   ⚠️ Skipped: ${skippedRows}`);
+    console.log(`   👥 Unique users: ${Object.keys(userPermissions).length}`);
+    
+    // Log sample of permissions for debugging
+    const sampleUsers = Object.keys(userPermissions).slice(0, 3);
+    sampleUsers.forEach(user => {
+      console.log(`   📋 ${user}: [${userPermissions[user].join(', ')}]`);
+    });
+    
+    // Cache the permissions
+    userPermissionsCache.set('permissions', { 
+      data: userPermissions, 
+      timestamp: Date.now(),
+      stats: {
+        totalRows: data.length,
+        processedRows,
+        skippedRows,
+        uniqueUsers: Object.keys(userPermissions).length
+      }
+    });
+    
     return userPermissions;
+    
   } catch (error) {
-    console.error('Error fetching permissions:', error);
+    console.error('❌ Error fetching permissions from Excel:', error);
+    
+    if (error.name === 'NoSuchKey') {
+      console.error('📄 Excel file "user info1.xlsx" not found in finallcpreports bucket');
+    } else if (error.name === 'AccessDenied') {
+      console.error('🔐 Access denied to finallcpreports bucket or user info1.xlsx file');
+    }
+    
     return {};
   }
 }
@@ -170,33 +253,45 @@ async function getUserPermissions() {
 }
 
 async function getUserCaseIds(gmailId) {
-  // Return all case IDs from S3 for any authenticated user
+  // Get case IDs assigned to specific user from Excel file
   try {
-    console.log(`📂 Fetching all case IDs from S3 for user: ${gmailId}`);
-    const command = new ListObjectsV2Command({
-      Bucket: 'finallcpreports',
-      Delimiter: '/'
-    });
-    const response = await s3.send(command);
-    const caseIds = [];
-    if (response.CommonPrefixes) {
-      response.CommonPrefixes.forEach(prefix => {
-        const folder = prefix.Prefix.replace('/', '');
-        if (/^\d{1,4}$/.test(folder)) {
-          caseIds.push(folder.padStart(4, '0'));
-        }
-      });
-    }
-    console.log(`✅ Found ${caseIds.length} case IDs in S3`);
-    return caseIds;
+    console.log(`📂 Fetching assigned case IDs for user: ${gmailId}`);
+    
+    const permissions = await getUserPermissions();
+    const userCases = permissions[gmailId.toLowerCase().trim()] || [];
+    
+    console.log(`✅ User ${gmailId} has access to ${userCases.length} case IDs:`, userCases);
+    return userCases;
   } catch (error) {
-    console.error('❌ Error fetching case IDs from S3:', error);
+    console.error('❌ Error fetching user case IDs:', error);
     return [];
   }
 }
 
 async function hasAccessToCase(gmailId, caseId) {
-  return true; // All authenticated users have access
+  // Check if user has access to specific case ID based on Excel mapping
+  try {
+    const permissions = await getUserPermissions();
+    const userCases = permissions[gmailId.toLowerCase().trim()] || [];
+    
+    // Normalize case ID for comparison
+    let normalizedCaseId = caseId.toString().trim();
+    if (/^\d{1,4}$/.test(normalizedCaseId)) {
+      normalizedCaseId = normalizedCaseId.padStart(4, '0');
+    }
+    
+    const hasAccess = userCases.includes(normalizedCaseId);
+    
+    // Only log denied access for security monitoring
+    if (!hasAccess) {
+      console.log(`🔐 Access DENIED: ${gmailId} -> ${normalizedCaseId}`);
+    }
+    
+    return hasAccess;
+  } catch (error) {
+    console.error('❌ Error checking case access:', error);
+    return false; // Deny access on error
+  }
 }
 function updateMcpProgress(caseId, data) {
   const existingData = mcpProgressStore.get(caseId) || {};
@@ -219,6 +314,13 @@ function updateMcpProgress(caseId, data) {
   
   // Save to file after each update
   saveProgressToFile();
+  
+  console.log(`📊 Progress updated for case ${caseId}:`, {
+    step: updatedData.step,
+    progress: updatedData.progress,
+    status: updatedData.status,
+    userEmail: updatedData.userEmail
+  });
 }
 
 function getMcpProgress(caseId) {
@@ -1206,13 +1308,17 @@ app.get('/api/user-permissions', authenticateUser, async (req, res) => {
   try {
     const userEmail = req.userEmail;
     const userCases = await getUserCaseIds(userEmail);
+    const allPermissions = await getUserPermissions();
     
     res.json({
       success: true,
       userEmail,
       caseCount: userCases.length,
       cases: userCases,
-      message: `User ${userEmail} has access to ${userCases.length} cases`
+      message: `User ${userEmail} has access to ${userCases.length} cases`,
+      // Include cache stats for debugging
+      cacheStats: userPermissionsCache.get('permissions')?.stats || null,
+      totalUsersInSystem: Object.keys(allPermissions).length
     });
   } catch (error) {
     console.error('Error fetching user permissions:', error);
@@ -1242,6 +1348,41 @@ app.post('/api/refresh-permissions', authenticateUser, async (req, res) => {
     res.status(500).json({
       success: false,
       error: error.message
+    });
+  }
+});
+
+/* -------------------- EXCEL FILE DEBUG ENDPOINT ------------------- */
+app.get('/api/debug-excel', authenticateUser, async (req, res) => {
+  try {
+    console.log('🔍 Excel debug endpoint called by:', req.userEmail);
+    
+    // Force refresh permissions to get latest data
+    userPermissionsCache.delete('permissions');
+    const permissions = await fetchUserPermissions();
+    const cached = userPermissionsCache.get('permissions');
+    
+    res.json({
+      success: true,
+      message: 'Excel file debug information',
+      stats: cached?.stats || {},
+      sampleData: {
+        totalUsers: Object.keys(permissions).length,
+        firstFiveUsers: Object.keys(permissions).slice(0, 5).map(email => ({
+          email,
+          caseCount: permissions[email].length,
+          cases: permissions[email]
+        }))
+      },
+      requestedBy: req.userEmail,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Error in Excel debug:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      message: 'Failed to debug Excel file'
     });
   }
 });
