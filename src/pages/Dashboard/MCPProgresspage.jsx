@@ -2,7 +2,9 @@ import { useEffect, useState } from 'react';
 import { ChevronLeft, CheckCircle2, AlertCircle } from 'lucide-react';
 
 const API_BASE =
- import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001';
+  import.meta.env.VITE_API_BASE_URL || 
+  import.meta.env.VITE_API_BASE_URL_PRODUCTION || 
+  'https://medxperts-backend.onrender.com';
 
 console.log('API_BASE configured as:', API_BASE);
 

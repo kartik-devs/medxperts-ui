@@ -16,7 +16,9 @@ import {
   Loader2,
 } from 'lucide-react';
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001';
+const API_BASE = import.meta.env.VITE_API_BASE_URL || 
+                 import.meta.env.VITE_API_BASE_URL_PRODUCTION || 
+                 'https://medxperts-backend.onrender.com';
 
 const ReportHistory = () => {
   const navigate = useNavigate();

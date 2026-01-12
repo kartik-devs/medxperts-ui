@@ -40,6 +40,7 @@ app.use(cors({
     'https://medxperts.onrender.com',
     'https://medxperts-ui.onrender.com',
     'https://medxperts-frountend.onrender.com',
+    'https://medxperts-frontend.onrender.com',
     process.env.FRONTEND_URL
   ].filter(Boolean),
   credentials: true,

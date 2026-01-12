@@ -3,7 +3,9 @@
  * Calls backend API with user authentication for filtered results
  */
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 
+                     import.meta.env.VITE_API_BASE_URL_PRODUCTION || 
+                     'https://medxperts-backend.onrender.com';
 
 // Get current user email from Firebase auth
 function getCurrentUserEmail() {

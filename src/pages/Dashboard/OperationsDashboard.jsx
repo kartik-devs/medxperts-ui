@@ -688,7 +688,10 @@ const OperationsDashboard = () => {
                         navigate('/mcp-progress');
                       } else {
                         // Check if there are any processing reports in the report history
-                        const response = await fetch(`${import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001'}/api/report-history?gmailId=${localStorage.getItem('userEmail') || ''}`);
+                        const API_URL = import.meta.env.VITE_API_BASE_URL || 
+                                       import.meta.env.VITE_API_BASE_URL_PRODUCTION || 
+                                       'https://medxperts-backend.onrender.com';
+                        const response = await fetch(`${API_URL}/api/report-history?gmailId=${localStorage.getItem('userEmail') || ''}`);
                         
                         if (response.ok) {
                           const data = await response.json();
