@@ -134,13 +134,21 @@ const CACHE_DURATION = 5 * 60 * 1000;
 async function fetchUserPermissions() {
   try {
     console.log('📊 Fetching user permissions from S3 Excel file...');
+    console.log('🔗 S3 Config:', {
+      region: process.env.AWS_REGION || 'us-east-1',
+      hasAccessKey: !!process.env.AWS_ACCESS_KEY_ID,
+      hasSecretKey: !!process.env.AWS_SECRET_ACCESS_KEY
+    });
     
     const command = new GetObjectCommand({ 
       Bucket: 'finallcpreports', 
       Key: 'user info1.xlsx' 
     });
     
+    console.log('📡 Attempting to fetch from S3: finallcpreports/user info1.xlsx');
     const response = await s3.send(command);
+    console.log('✅ S3 response received, processing Excel file...');
+    
     const chunks = [];
     
     for await (const chunk of response.Body) { 
@@ -148,11 +156,20 @@ async function fetchUserPermissions() {
     }
     
     const buffer = Buffer.concat(chunks);
+    console.log(`📄 Excel file size: ${buffer.length} bytes`);
+    
     const workbook = xlsx.read(buffer, { type: 'buffer' });
     const worksheet = workbook.Sheets[workbook.SheetNames[0]];
     const data = xlsx.utils.sheet_to_json(worksheet);
     
     console.log(`📋 Processing ${data.length} rows from Excel file`);
+    console.log(`📝 Sheet name: ${workbook.SheetNames[0]}`);
+    
+    // Log first few rows for debugging
+    if (data.length > 0) {
+      console.log('📋 First 3 rows:', data.slice(0, 3));
+      console.log('📋 Column headers:', Object.keys(data[0]));
+    }
     
     const userPermissions = {};
     let processedRows = 0;
@@ -235,11 +252,19 @@ async function fetchUserPermissions() {
     
   } catch (error) {
     console.error('❌ Error fetching permissions from Excel:', error);
+    console.error('❌ Error details:', {
+      name: error.name,
+      message: error.message,
+      code: error.code,
+      statusCode: error.$metadata?.httpStatusCode
+    });
     
     if (error.name === 'NoSuchKey') {
       console.error('📄 Excel file "user info1.xlsx" not found in finallcpreports bucket');
     } else if (error.name === 'AccessDenied') {
       console.error('🔐 Access denied to finallcpreports bucket or user info1.xlsx file');
+    } else if (error.name === 'CredentialsProviderError') {
+      console.error('🔑 AWS credentials not found or invalid');
     }
     
     return {};
@@ -258,6 +283,9 @@ async function getUserCaseIds(gmailId) {
     console.log(`📂 Fetching assigned case IDs for user: ${gmailId}`);
     
     const permissions = await getUserPermissions();
+    console.log(`📊 Total users in permissions: ${Object.keys(permissions).length}`);
+    console.log(`📋 Sample permissions keys:`, Object.keys(permissions).slice(0, 3));
+    
     const userCases = permissions[gmailId.toLowerCase().trim()] || [];
     
     console.log(`✅ User ${gmailId} has access to ${userCases.length} case IDs:`, userCases);
