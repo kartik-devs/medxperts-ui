@@ -1,7 +1,7 @@
 // src/components/AWSConfigChecker.jsx
 import { useState, useEffect } from 'react';
 import { CheckCircle2, XCircle, AlertTriangle, Settings } from 'lucide-react';
-//import { uploadFileToS3 } from '../config/aws-config';
+import { uploadFileToS3 } from '../config/aws-config';
 
 const AWSConfigChecker = () => {
   const [configStatus, setConfigStatus] = useState({

@@ -3,16 +3,7 @@
  * Calls backend API with user authentication for filtered results
  */
 
-const viteApiBaseUrl = import.meta.env.VITE_API_BASE_URL
-  ? import.meta.env.VITE_API_BASE_URL.replace(/\/$/, '')
-  : '';
-
-const isLocalhost =
-  typeof window !== 'undefined' &&
-  (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
-
-// Use VITE_API_BASE_URL if set, otherwise fall back to window.location.origin
-const API_BASE_URL = viteApiBaseUrl || window.location.origin;
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001';
 
 // Get current user email from Firebase auth
 function getCurrentUserEmail() {
@@ -20,10 +11,11 @@ function getCurrentUserEmail() {
   // For now, we'll get it from localStorage or a global state
   const userEmail = localStorage.getItem('userEmail') || 
                    sessionStorage.getItem('userEmail') ||
-                   window.currentUserEmail;
+                   window.currentUserEmail ||
+                   'test@gmail.com'; // Default for testing
   
-  if (!userEmail) {
-    throw new Error('User not authenticated. Please log in first.');
+  if (!userEmail || userEmail === 'test@gmail.com') {
+    console.warn('⚠️ Using test email. Please ensure user is properly logged in.');
   }
   
   return userEmail;
@@ -222,8 +214,6 @@ export async function getUserPermissions() {
     return { success: false, error: error.message };
   }
 }
-
-
 
 /**
  * Add a case to localStorage for future searches (optional - for storing submitted cases)

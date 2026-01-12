@@ -1,7 +1,7 @@
 // src/components/FirebaseDebug.jsx
 import { useState, useEffect } from 'react';
-//import { auth } from '../firebase';
-//import { useAuth } from '../contexts/AuthContext';
+import { auth } from '../firebase';
+import { useAuth } from '../contexts/AuthContext';
 
 const FirebaseDebug = () => {
   const { currentUser } = useAuth();
