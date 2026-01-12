@@ -1363,16 +1363,46 @@ app.post('/api/refresh-permissions', authenticateUser, async (req, res) => {
     
     // Clear cache and fetch fresh data
     userPermissionsCache.delete('permissions');
+    console.log('🗑️ Permissions cache cleared');
+    
     const permissions = await fetchUserPermissions();
     
     res.json({
       success: true,
       message: 'Permissions cache refreshed successfully',
       userCount: Object.keys(permissions).length,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      sampleUsers: Object.keys(permissions).slice(0, 3)
     });
   } catch (error) {
     console.error('Error refreshing permissions:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+/* -------------------- FORCE CACHE CLEAR (DEBUG) ------------------- */
+app.get('/api/clear-cache', async (req, res) => {
+  try {
+    console.log('🗑️ Force clearing all caches...');
+    
+    // Clear permissions cache
+    userPermissionsCache.clear();
+    
+    // Force fresh fetch
+    const permissions = await fetchUserPermissions();
+    
+    res.json({
+      success: true,
+      message: 'All caches cleared and refreshed',
+      userCount: Object.keys(permissions).length,
+      timestamp: new Date().toISOString(),
+      debug: true
+    });
+  } catch (error) {
+    console.error('Error clearing cache:', error);
     res.status(500).json({
       success: false,
       error: error.message
