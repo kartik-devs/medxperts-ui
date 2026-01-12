@@ -39,6 +39,7 @@ app.use(cors({
     'http://localhost:5174',
     'https://medxperts.onrender.com',
     'https://medxperts-ui.onrender.com',
+    'https://medxperts-frountend.onrender.com',
     process.env.FRONTEND_URL
   ].filter(Boolean),
   credentials: true,
