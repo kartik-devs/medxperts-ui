@@ -20,6 +20,12 @@ const API_BASE = import.meta.env.VITE_API_BASE_URL ||
                  import.meta.env.VITE_API_BASE_URL_PRODUCTION || 
                  'https://medxperts-backend.onrender.com';
 
+// Add deployment detection
+const isDeployment = window.location.hostname.includes('render.com') || 
+                    window.location.hostname.includes('onrender.com') ||
+                    window.location.hostname.includes('netlify.app') ||
+                    window.location.hostname.includes('vercel.app');
+
 const ReportHistory = () => {
   const navigate = useNavigate();
   const abortControllerRef = useRef(null);
@@ -45,15 +51,26 @@ const ReportHistory = () => {
     console.error(`❌ Report History Error [${context}]:`, err);
     
     if (err.name === 'AbortError') {
-      console.log('🚫 Request was aborted');
+      console.log('🚫 Request was aborted (normal during cleanup)');
       return;
     }
     
-    const errorMessage = err.message || 'Unknown error occurred';
-    setError(`${context}: ${errorMessage}`);
+    // Handle deployment/network issues gracefully
+    if (err.message.includes('Failed to fetch') || 
+        err.message.includes('NetworkError') ||
+        err.message.includes('ERR_NETWORK') ||
+        err.name === 'TypeError') {
+      console.log('🌐 Network issue detected, likely during deployment');
+      setError('Service temporarily unavailable during deployment. Please try again in a moment.');
+    } else {
+      const errorMessage = err.message || 'Unknown error occurred';
+      setError(`${context}: ${errorMessage}`);
+    }
     
-    // Auto-retry logic for network errors
-    if (retryCount < 3 && (err.name === 'TypeError' || err.message.includes('fetch'))) {
+    // Auto-retry logic for network errors (but not during deployment)
+    if (retryCount < 3 && 
+        (err.name === 'TypeError' || err.message.includes('fetch')) &&
+        !err.message.includes('deployment')) {
       const delay = Math.min(1000 * Math.pow(2, retryCount), 10000); // Exponential backoff
       console.log(`🔄 Auto-retry in ${delay}ms (attempt ${retryCount + 1}/3)`);
       
@@ -72,7 +89,13 @@ const ReportHistory = () => {
         abortControllerRef.current.abort();
       }
       
+      // Create new controller with timeout
       abortControllerRef.current = new AbortController();
+      const timeoutId = setTimeout(() => {
+        if (abortControllerRef.current) {
+          abortControllerRef.current.abort();
+        }
+      }, 30000); // 30 second timeout
       
       if (showLoadingState) {
         setLoading(true);
@@ -86,6 +109,7 @@ const ReportHistory = () => {
                        document.querySelector('[data-user-email]')?.dataset.userEmail;
 
       if (!userEmail) {
+        clearTimeout(timeoutId);
         throw new Error('User authentication required. Please log in again.');
       }
 
@@ -101,6 +125,9 @@ const ReportHistory = () => {
         // Prevent caching for real-time data
         cache: 'no-store',
       });
+
+      // Clear timeout on successful response
+      clearTimeout(timeoutId);
 
       if (!response.ok) {
         const errorText = await response.text();
@@ -166,6 +193,12 @@ const ReportHistory = () => {
       }
       
     } catch (err) {
+      // Don't handle AbortError as real error during cleanup
+      if (err.name === 'AbortError') {
+        console.log('🚫 Request was cancelled (normal during cleanup)');
+        return;
+      }
+      
       handleError(err, 'Loading Reports');
       setReports([]); // Clear reports on error
     } finally {
@@ -265,24 +298,40 @@ const ReportHistory = () => {
     
     // Cleanup
     return () => {
-      // Clear all timers and controllers
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
-      }
-      if (pollingIntervalRef.current) {
-        clearInterval(pollingIntervalRef.current);
-      }
+      // Clear all timers and controllers gracefully
       if (retryTimeoutRef.current) {
         clearTimeout(retryTimeoutRef.current);
+        retryTimeoutRef.current = null;
+      }
+      
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current);
+        pollingIntervalRef.current = null;
+      }
+      
+      // Abort any ongoing requests without logging errors
+      if (abortControllerRef.current) {
+        try {
+          abortControllerRef.current.abort();
+        } catch (err) {
+          // Ignore abort errors during cleanup
+        }
+        abortControllerRef.current = null;
       }
       
       // Remove event listeners
-      delete window.refreshReportHistory;
-      window.removeEventListener('reportGenerated', handleReportGenerated);
-      window.removeEventListener('mcpCompleted', handleReportGenerated);
-      window.removeEventListener('mcpFailed', handleReportGenerated);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      window.removeEventListener('focus', handleFocus);
+      try {
+        delete window.refreshReportHistory;
+        window.removeEventListener('reportGenerated', handleReportGenerated);
+        window.removeEventListener('mcpCompleted', handleReportGenerated);
+        window.removeEventListener('mcpFailed', handleReportFailed);
+        window.removeEventListener('workflowFailed', handleReportFailed);
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
+        window.removeEventListener('focus', handleFocus);
+      } catch (err) {
+        // Ignore cleanup errors
+        console.warn('Cleanup warning:', err.message);
+      }
     };
   }, [loadReports]);
 
@@ -492,13 +541,20 @@ const ReportHistory = () => {
     );
   };
 
-  // Loading state
+  // Loading state with deployment awareness
   if (loading && reports.length === 0) {
     return (
       <div className="bg-white border border-slate-200 rounded-2xl shadow-sm">
         <div className="p-12 text-center">
           <Loader2 className="w-8 h-8 text-blue-600 animate-spin mx-auto mb-4" />
-          <p className="text-sm text-slate-600">Loading report history…</p>
+          <p className="text-sm text-slate-600">
+            {isDeployment ? 'Loading report history (deployment in progress)…' : 'Loading report history…'}
+          </p>
+          {isDeployment && (
+            <p className="text-xs text-slate-500 mt-2">
+              If this takes longer than usual, the service may be restarting. Please wait a moment.
+            </p>
+          )}
         </div>
       </div>
     );
