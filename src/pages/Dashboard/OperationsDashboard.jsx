@@ -19,6 +19,8 @@ import {
   ExternalLink,
   Copy,
   RefreshCw,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 
 /* ==================== SEARCH CASE SECTION COMPONENT ==================== */
@@ -520,6 +522,92 @@ const SearchCaseSection = () => {
 const OperationsDashboard = () => {
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState('');
+  const [stats, setStats] = useState({
+    activeCases: 0,
+    inProgress: 0,
+    completed: 0,
+    issues: 0
+  });
+  const [caseLists, setCaseLists] = useState({
+    activeCases: [],
+    inProgress: [],
+    completed: [],
+    issues: []
+  });
+  const [assignedCaseIds, setAssignedCaseIds] = useState([]);
+  const [totalCasesAccess, setTotalCasesAccess] = useState(0);
+  const [expandedStat, setExpandedStat] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [recentActivity, setRecentActivity] = useState([]);
+  const [statsError, setStatsError] = useState(null);
+
+  // Fetch dashboard statistics from backend
+  const fetchDashboardStats = async () => {
+    try {
+      const userEmail = localStorage.getItem('userEmail') || 
+                       sessionStorage.getItem('userEmail');
+
+      if (!userEmail) {
+        console.warn('No user email found, skipping stats fetch');
+        setLoading(false);
+        return;
+      }
+
+      const API_URL = import.meta.env.VITE_API_BASE_URL || 
+                     import.meta.env.VITE_API_BASE_URL_PRODUCTION || 
+                     'https://medxperts-backend.onrender.com';
+
+      console.log('📊 Fetching dashboard stats for:', userEmail);
+
+      const response = await fetch(`${API_URL}/api/dashboard-stats`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-email': userEmail,
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+
+      if (data.success) {
+        console.log('✅ Dashboard stats loaded:', data.stats);
+        setStats(data.stats);
+        setCaseLists(data.caseLists || {
+          activeCases: [],
+          inProgress: [],
+          completed: [],
+          issues: []
+        });
+        setAssignedCaseIds(data.assignedCaseIds || []);
+        setTotalCasesAccess(data.totalCasesAccess || 0);
+        setRecentActivity(data.recentActivity || []);
+        setStatsError(null);
+      } else {
+        throw new Error(data.message || 'Failed to load dashboard stats');
+      }
+
+    } catch (error) {
+      console.error('❌ Error fetching dashboard stats:', error);
+      setStatsError(error.message);
+      // Keep existing stats on error
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Fetch stats on mount and refresh periodically
+  React.useEffect(() => {
+    fetchDashboardStats();
+
+    // Refresh stats every 30 seconds
+    const interval = setInterval(fetchDashboardStats, 30000);
+
+    return () => clearInterval(interval);
+  }, []);
 
   // Refresh report history when dashboard loads
   React.useEffect(() => {
@@ -530,33 +618,45 @@ const OperationsDashboard = () => {
       }, 500);
     }
   }, []);
-  const stats = [
-    { label: 'Active Cases', value: 12, icon: FileText, color: 'blue' },
-    { label: 'In Progress', value: 8, icon: Clock, color: 'yellow' },
-    { label: 'Completed', value: 24, icon: Eye, color: 'green' },
-    { label: 'Issues', value: 3, icon: AlertTriangle, color: 'red' },
+  const statsConfig = [
+    { 
+      label: 'Active Cases', 
+      value: stats.activeCases, 
+      icon: FileText, 
+      color: 'blue',
+      description: 'Cases in progress or pending',
+      key: 'activeCases'
+    },
+    { 
+      label: 'In Progress', 
+      value: stats.inProgress, 
+      icon: Clock, 
+      color: 'yellow',
+      description: 'Currently processing',
+      key: 'inProgress'
+    },
+    { 
+      label: 'Completed', 
+      value: stats.completed, 
+      icon: Eye, 
+      color: 'green',
+      description: 'Successfully completed',
+      key: 'completed'
+    },
+    { 
+      label: 'Issues', 
+      value: stats.issues, 
+      icon: AlertTriangle, 
+      color: 'red',
+      description: 'Failed or error cases',
+      key: 'issues'
+    },
   ];
 
-  const recentActivity = [
-    {
-      action: 'Report Generated',
-      type: 'MCP',
-      caseId: '#MCP-24-892',
-      time: '2 hours ago',
-    },
-    {
-      action: 'Review Required',
-      type: 'LCP',
-      caseId: '#LCP-24-891',
-      time: '3 hours ago',
-    },
-    {
-      action: 'Processing',
-      type: 'MCP',
-      caseId: '#MCP-24-890',
-      time: '4 hours ago',
-    },
-  ];
+  const handleCaseClick = (caseId) => {
+    localStorage.setItem('mcp_case_id', caseId);
+    navigate('/mcp-progress');
+  };
 
   return (
     <div className="min-h-screen bg-white flex flex-col max-w-full">{/* Added max-w-full */}
@@ -590,64 +690,252 @@ const OperationsDashboard = () => {
       {/* ================= MAIN ================= */}
       <div className="flex-1 p-8">{/* Removed overflow-auto */}
 
+        {/* -------- STATS ERROR MESSAGE -------- */}
+        {statsError && (
+          <div className="mb-6 bg-red-50 border border-red-200 rounded-xl p-4 flex items-center gap-3">
+            <AlertTriangle className="w-5 h-5 text-red-600 flex-shrink-0" />
+            <div className="flex-1">
+              <p className="text-sm font-medium text-red-800">Failed to load statistics</p>
+              <p className="text-xs text-red-600 mt-1">{statsError}</p>
+            </div>
+            <button
+              onClick={fetchDashboardStats}
+              className="px-3 py-1.5 bg-red-600 text-white rounded-lg text-xs font-medium hover:bg-red-700 transition-colors"
+            >
+              Retry
+            </button>
+          </div>
+        )}
+
         {/* -------- STATS -------- */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-          {stats.map((stat, i) => (
-            <div
-              key={i}
-              className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm"
-            >
-              <div className="flex items-center gap-4">
-                <div className={`p-3 rounded-lg bg-${stat.color}-100`}>
-                  <stat.icon className={`w-6 h-6 text-${stat.color}-600`} />
+          {statsConfig.map((stat, i) => {
+            const isExpanded = expandedStat === stat.key;
+            const caseList = caseLists[stat.key] || [];
+            const hasCase = caseList.length > 0;
+            
+            // For Active Cases, show all assigned cases
+            const showAllAssigned = stat.key === 'activeCases';
+            const displayList = showAllAssigned && isExpanded ? assignedCaseIds : caseList;
+
+            return (
+              <div key={i} className="bg-white border border-slate-200 rounded-xl shadow-sm hover:shadow-md transition-shadow">
+                {/* Stats Card Header */}
+                <div className="p-5 relative overflow-hidden">
+                  {/* Loading overlay */}
+                  {loading && (
+                    <div className="absolute inset-0 bg-white bg-opacity-75 flex items-center justify-center">
+                      <div className="w-6 h-6 border-2 border-slate-300 border-t-blue-600 rounded-full animate-spin"></div>
+                    </div>
+                  )}
+                  
+                  <div className="flex items-center gap-4">
+                    <div className={`p-3 rounded-lg bg-${stat.color}-100`}>
+                      <stat.icon className={`w-6 h-6 text-${stat.color}-600`} />
+                    </div>
+                    <div className="flex-1">
+                      <p className="text-sm text-slate-500">{stat.label}</p>
+                      <p className="text-2xl font-bold text-slate-900">
+                        {loading ? '...' : stat.value}
+                      </p>
+                      {!loading && (
+                        <>
+                          <p className="text-xs text-slate-400 mt-1">{stat.description}</p>
+                          {showAllAssigned && totalCasesAccess > 0 && (
+                            <p className="text-xs text-blue-600 font-medium mt-1">
+                              Total assigned: {totalCasesAccess}
+                            </p>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Expand button */}
+                  {!loading && (showAllAssigned ? assignedCaseIds.length > 0 : hasCase) && (
+                    <button
+                      onClick={() => setExpandedStat(isExpanded ? null : stat.key)}
+                      className="absolute top-3 right-3 p-2 hover:bg-slate-100 rounded-lg transition-colors"
+                      title={isExpanded ? 'Hide cases' : 'Show cases'}
+                    >
+                      {isExpanded ? (
+                        <ChevronUp className="w-4 h-4 text-slate-600" />
+                      ) : (
+                        <ChevronDown className="w-4 h-4 text-slate-600" />
+                      )}
+                    </button>
+                  )}
                 </div>
-                <div>
-                  <p className="text-sm text-slate-500">{stat.label}</p>
-                  <p className="text-2xl font-bold text-slate-900">
-                    {stat.value}
-                  </p>
-                </div>
+
+                {/* Expandable Case List */}
+                {isExpanded && (showAllAssigned ? assignedCaseIds.length > 0 : hasCase) && (
+                  <div className="border-t border-slate-200 bg-slate-50 max-h-64 overflow-y-auto">
+                    {showAllAssigned ? (
+                      // Show all assigned case IDs for Active Cases
+                      <div className="p-3">
+                        <div className="mb-2 px-2">
+                          <p className="text-xs font-semibold text-slate-600 uppercase">
+                            All Assigned Cases ({assignedCaseIds.length})
+                          </p>
+                          <p className="text-xs text-slate-500 mt-1">
+                            Cases you have permission to access
+                          </p>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          {displayList.map((caseId, idx) => (
+                            <button
+                              key={idx}
+                              onClick={() => handleCaseClick(caseId)}
+                              className="p-2 bg-white border border-slate-200 rounded-lg hover:border-blue-400 hover:shadow-sm transition-all text-left group"
+                            >
+                              <div className="flex items-center justify-between">
+                                <span className="font-mono text-xs font-semibold text-slate-900">
+                                  {caseId}
+                                </span>
+                                <ExternalLink className="w-3 h-3 text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity" />
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ) : (
+                      // Show detailed case info for other stats
+                      <div className="p-3 space-y-2">
+                        {caseList.map((caseItem, idx) => (
+                          <button
+                            key={idx}
+                            onClick={() => handleCaseClick(caseItem.caseId)}
+                            className="w-full text-left p-3 bg-white border border-slate-200 rounded-lg hover:border-blue-400 hover:shadow-sm transition-all group"
+                          >
+                            <div className="flex items-center justify-between">
+                              <div className="flex-1">
+                                <div className="flex items-center gap-2">
+                                  <span className="font-mono text-sm font-semibold text-slate-900">
+                                    {caseItem.caseId}
+                                  </span>
+                                  <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${
+                                    caseItem.type === 'MCP'
+                                      ? 'bg-green-100 text-green-700'
+                                      : 'bg-purple-100 text-purple-700'
+                                  }`}>
+                                    {caseItem.type}
+                                  </span>
+                                </div>
+                                {caseItem.step && (
+                                  <p className="text-xs text-slate-500 mt-1">{caseItem.step}</p>
+                                )}
+                                {caseItem.progress > 0 && caseItem.progress < 100 && (
+                                  <div className="mt-2">
+                                    <div className="flex items-center justify-between text-xs mb-1">
+                                      <span className="text-slate-600">Progress</span>
+                                      <span className="font-semibold text-blue-600">{caseItem.progress}%</span>
+                                    </div>
+                                    <div className="w-full bg-slate-200 rounded-full h-1.5">
+                                      <div 
+                                        className="bg-blue-600 h-1.5 rounded-full transition-all"
+                                        style={{ width: `${caseItem.progress}%` }}
+                                      ></div>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                              <ExternalLink className="w-4 h-4 text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity ml-2" />
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* No cases message */}
+                {isExpanded && !showAllAssigned && !hasCase && (
+                  <div className="border-t border-slate-200 bg-slate-50 p-4 text-center">
+                    <p className="text-sm text-slate-500">No cases in this category</p>
+                  </div>
+                )}
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
 
         {/* -------- RECENT ACTIVITY -------- */}
         <div className="bg-white border border-slate-200 rounded-2xl shadow-sm mb-10">
-          <div className="px-6 py-4 border-b border-slate-200">
+          <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
             <h3 className="text-lg font-bold text-slate-900">
               Recent Activity
             </h3>
+            <button
+              onClick={fetchDashboardStats}
+              disabled={loading}
+              className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-medium hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center gap-2"
+            >
+              <RefreshCw className={`w-3 h-3 ${loading ? 'animate-spin' : ''}`} />
+              Refresh
+            </button>
           </div>
 
           <div className="divide-y divide-slate-100">
-            {recentActivity.map((item, i) => (
-              <div
-                key={i}
-                className="flex items-center justify-between px-6 py-4"
-              >
-                <div>
-                  <p className="text-sm font-semibold text-slate-800">
-                    {item.action}
-                  </p>
-                  <div className="flex items-center gap-2 mt-1">
-                    <span
-                      className={`px-2 py-0.5 rounded-full text-xs font-bold ${
-                        item.type === 'MCP'
-                          ? 'bg-green-100 text-green-700'
-                          : 'bg-purple-100 text-purple-700'
-                      }`}
-                    >
-                      {item.type}
-                    </span>
-                    <span className="text-xs text-slate-500">
-                      {item.caseId}
-                    </span>
+            {loading && recentActivity.length === 0 ? (
+              <div className="px-6 py-8 text-center text-slate-500">
+                <div className="w-8 h-8 border-2 border-slate-300 border-t-blue-600 rounded-full animate-spin mx-auto mb-3"></div>
+                <p className="text-sm">Loading recent activity...</p>
+              </div>
+            ) : recentActivity.length > 0 ? (
+              recentActivity.map((item, i) => (
+                <div
+                  key={i}
+                  className="flex items-center justify-between px-6 py-4 hover:bg-slate-50 transition-colors cursor-pointer"
+                  onClick={() => {
+                    localStorage.setItem('mcp_case_id', item.caseId);
+                    navigate('/mcp-progress');
+                  }}
+                >
+                  <div>
+                    <p className="text-sm font-semibold text-slate-800">
+                      {item.action}
+                    </p>
+                    <div className="flex items-center gap-2 mt-1">
+                      <span
+                        className={`px-2 py-0.5 rounded-full text-xs font-bold ${
+                          item.type === 'MCP'
+                            ? 'bg-green-100 text-green-700'
+                            : 'bg-purple-100 text-purple-700'
+                        }`}
+                      >
+                        {item.type}
+                      </span>
+                      <span className="text-xs text-slate-500 font-mono">
+                        {item.caseId}
+                      </span>
+                      {item.step && (
+                        <span className="text-xs text-slate-400">
+                          • {item.step}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-xs text-slate-400">{item.timeAgo}</span>
+                    {item.progress > 0 && (
+                      <div className="mt-1">
+                        <span className="text-xs font-medium text-blue-600">
+                          {item.progress}%
+                        </span>
+                      </div>
+                    )}
                   </div>
                 </div>
-                <span className="text-xs text-slate-400">{item.time}</span>
+              ))
+            ) : (
+              <div className="px-6 py-8 text-center text-slate-500">
+                <FileText className="w-12 h-12 text-slate-300 mx-auto mb-3" />
+                <p className="text-sm font-medium">No recent activity</p>
+                <p className="text-xs text-slate-400 mt-1">
+                  Start a new case to see activity here
+                </p>
               </div>
-            ))}
+            )}
           </div>
         </div>
 
@@ -655,7 +943,10 @@ const OperationsDashboard = () => {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-10 items-stretch">
 
           {/* MCP */}
-          <div className="group cursor-pointer">
+          <div
+            onClick={() => navigate('/medicalcostprojection')}
+            className="group cursor-pointer"
+          >
             <div className="h-full min-h-[260px] flex flex-col justify-between bg-gradient-to-br from-green-50 to-emerald-50 border border-green-100 rounded-2xl shadow-lg hover:shadow-2xl transition-all duration-300 hover:scale-[1.02]">
               <div className="p-6">
                 <div className="flex justify-between mb-4">
@@ -671,66 +962,8 @@ const OperationsDashboard = () => {
                   Medical Case Processing with comprehensive diagnostic analysis
                 </p>
               </div>
-              <div className="px-6 pb-6 space-y-3">
-                <button
-                  onClick={async () => {
-                    try {
-                      // Check if there are any processing reports
-                      if (window.refreshReportHistory) {
-                        // Get fresh report data
-                        await window.refreshReportHistory();
-                      }
-                      
-                      // Check localStorage for current case
-                      const currentCaseId = localStorage.getItem('mcp_case_id');
-                      
-                      if (currentCaseId) {
-                        navigate('/mcp-progress');
-                      } else {
-                        // Check if there are any processing reports in the report history
-                        const API_URL = import.meta.env.VITE_API_BASE_URL || 
-                                       import.meta.env.VITE_API_BASE_URL_PRODUCTION || 
-                                       'https://medxperts-backend.onrender.com';
-                        const response = await fetch(`${API_URL}/api/report-history?gmailId=${localStorage.getItem('userEmail') || ''}`);
-                        
-                        if (response.ok) {
-                          const data = await response.json();
-                          const processingReports = data.reports?.filter(r => r.status === 'Processing') || [];
-                          
-                          if (processingReports.length > 0) {
-                            // If there are processing reports, use the most recent one
-                            const latestReport = processingReports[0];
-                            localStorage.setItem('mcp_case_id', latestReport.caseId);
-                            navigate('/mcp-progress');
-                          } else {
-                            // No processing reports found
-                            alert('No active MCP cases found. Please start a new case first.');
-                            navigate('/medicalcostprojection');
-                          }
-                        } else {
-                          // API error, fallback to starting new case
-                          alert('Unable to check for active cases. Please start a new case.');
-                          navigate('/medicalcostprojection');
-                        }
-                      }
-                    } catch (error) {
-                      console.error('Error checking for active cases:', error);
-                      alert('Unable to check for active cases. Please start a new case.');
-                      navigate('/medicalcostprojection');
-                    }
-                  }}
-                  className="w-full px-4 py-3 bg-blue-600 text-white rounded-xl text-sm font-medium hover:bg-blue-700 flex items-center justify-center gap-2 transition-all duration-200 shadow-sm hover:shadow-md"
-                >
-                  <Eye className="w-4 h-4" />
-                  View Live Progress
-                </button>
-                <button
-                  onClick={() => navigate('/medicalcostprojection')}
-                  className="w-full px-4 py-3 bg-green-600 text-white rounded-xl text-sm font-medium hover:bg-green-700 flex items-center justify-center gap-2 transition-all duration-200 shadow-sm hover:shadow-md"
-                >
-                  <FileText className="w-4 h-4" />
-                  Start New Case
-                </button>
+              <div className="px-6 pb-6 text-green-600 font-semibold text-sm">
+                Start Processing →
               </div>
             </div>
           </div>

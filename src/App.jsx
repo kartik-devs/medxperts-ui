@@ -1,6 +1,7 @@
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
 import ProtectedRoute from './components/ProtectedRoute';
+import ScrollToTop from './components/ScrollToTop';
 import Home from './pages/Home/Home';
 import Services from './pages/Services';
 import About from './pages/Home/About';
@@ -22,6 +23,7 @@ function App() {
   return (
     <Router>
       <AuthProvider>
+        <ScrollToTop />
         <div className="min-h-screen flex flex-col">
           <main className="flex-grow">
             <Routes>

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Upload, X, CheckCircle2, Copy, ChevronDown, Zap } from 'lucide-react';
 import { searchCaseIds, addCaseToLocalStorage, getAllCaseIds, testAPIConnection } from '../../contexts/search-case';
+import { generateLCPCase, uploadLCPFiles, uploadToExistingLCPCase } from '../../contexts/Homeroute/LifeCarePlan';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || '';
 
@@ -82,7 +83,7 @@ export default function LifeCarePlanPage() {
     return null;
   };
 
-  // ============ STEP 1: GENERATE CASE ID ============
+  // ============ STEP 1: TRIGGER WORKFLOW ============
   const handleGenerate = async () => {
     const err = validateForm();
     if (err) {
@@ -95,43 +96,37 @@ export default function LifeCarePlanPage() {
     setUploadComplete(false);
 
     try {
-      const res = await fetch(`${API_BASE}/api/mcp-generate-case`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          fullName,
-          gender,
-          maritalStatus,
-          ethnicity,
-          dateOfBirth,
-          email
-        }),
-      });
-
-      const data = await res.json();
-      console.log('[LCP] Generate case response:', data);
-
-      if (!res.ok || !data.caseId) {
-        throw new Error(data.error || 'Failed to generate case ID');
-      }
-
-      setGeneratedCaseId(data.caseId);
-      
-      // Store in localStorage for future use
-      addCaseToLocalStorage({
-        caseId: data.caseId,
-        patientName: fullName,
-        submittedAt: new Date().toISOString(),
+      const result = await generateLCPCase({
+        fullName,
         gender,
         maritalStatus,
+        ethnicity,
         dateOfBirth,
-        email,
-        ethnicity
+        email
       });
 
+      if (result.caseId) {
+        setGeneratedCaseId(result.caseId);
+        
+        // Store in localStorage for future use
+        addCaseToLocalStorage({
+          caseId: result.caseId,
+          patientName: fullName,
+          submittedAt: new Date().toISOString(),
+          gender,
+          maritalStatus,
+          dateOfBirth,
+          email,
+          ethnicity
+        });
+      } else {
+        // If no case ID returned, show success message
+        alert(result.message);
+      }
+
     } catch (err) {
-      console.error('Generate error:', err);
-      alert(`Failed to generate case: ${err.message}`);
+      console.error('Workflow trigger error:', err);
+      alert(`Failed to trigger workflow: ${err.message}`);
     } finally {
       setIsGenerating(false);
     }
@@ -151,67 +146,23 @@ const handleUpload = async () => {
   setIsUploading(true);
 
   try {
-    const formData = new FormData();
-    formData.append('caseId', generatedCaseId);
-    formData.append('fullName', fullName);
-    formData.append('gender', gender);
-    formData.append('maritalStatus', maritalStatus);
-    formData.append('ethnicity', ethnicity);
-    formData.append('dateOfBirth', dateOfBirth);
-    formData.append('email', email);
-    
-    // Add all files to FormData
-    files.forEach((file) => {
-      formData.append('file', file);
+    const result = await uploadLCPFiles(generatedCaseId, files, {
+      fullName,
+      gender,
+      maritalStatus,
+      ethnicity,
+      dateOfBirth,
+      email
     });
 
-    console.log('Sending files to n8n webhook...', {
-      caseId: generatedCaseId,
-      fileCount: files.length,
-      fileNames: files.map(f => f.name)
-    });
-
-    const res = await fetch('https://n8n.datakernels.in/webhook/awscrm', {
-      method: 'POST',
-      body: formData,
-    });
-
-    // Handle empty or non-JSON response
-    const responseText = await res.text();
-    let responseData = {};
-    
-    try {
-      responseData = responseText ? JSON.parse(responseText) : {};
-    } catch (e) {
-      console.log('Non-JSON response:', responseText);
-      // If the response is not JSON but the status is OK, consider it a success
-      if (res.ok) {
-        setUploadComplete(true);
-        console.log('Files uploaded successfully to n8n, caseId:', generatedCaseId);
-        return;
-      }
+    if (result.success) {
+      setUploadComplete(true);
+      console.log('Files uploaded successfully, caseId:', generatedCaseId);
     }
-
-    console.log('[LCP] n8n webhook response:', responseData);
-
-    if (!res.ok) {
-      throw new Error(responseData.error || `Upload failed with status ${res.status}`);
-    }
-
-    // If we get here, the upload was successful
-    setUploadComplete(true);
-    console.log('Files uploaded successfully to n8n, caseId:', generatedCaseId);
 
   } catch (err) {
     console.error('Upload error:', err);
-    const errorMessage = err.message || 'Unknown error occurred during upload';
-    alert(`Upload failed: ${errorMessage}`);
-    
-    console.error('Upload error details:', {
-      caseId: generatedCaseId,
-      error: errorMessage,
-      timestamp: new Date().toISOString()
-    });
+    alert(`Upload failed: ${err.message}`);
   } finally {
     setIsUploading(false);
   }
@@ -277,7 +228,9 @@ const handleUpload = async () => {
       setReportStatus('PROCESSING');
       localStorage.setItem('lcp_case_id', selectedCaseId);
 
-      await fetch('https://n8n.datakernels.in/webhook/mainworkflow', {
+      const lcpGenerateUrl = import.meta.env.VITE_N8N_WEBHOOK_URL_LCP_GENERATE ;
+
+      await fetch(lcpGenerateUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -356,34 +309,16 @@ const handleUpload = async () => {
       alert('Please select a Case ID');
       return;
     }
-    // Removed file count validation - allow 0 files
 
     setIsUploadingExisting(true);
 
     try {
-      const fd = new FormData();
-      fd.append('caseId', existingCaseId);
-      fd.append('isAdditionalUpload', 'true');
-      
-      // Add files if any exist
-      existingFiles.forEach((file) => {
-        fd.append('attachments', file);
-      });
+      const result = await uploadToExistingLCPCase(existingCaseId, existingFiles);
 
-      // Use the working webhook URL
-      const res = await fetch('https://n8n.datakernels.in/webhook/awscrm', {
-        method: 'POST',
-        body: fd,
-      });
-
-      const data = await res.json();
-      console.log('[LCP] Upload to existing case response:', data);
-
-      if (!res.ok) {
-        throw new Error(data.error || 'Upload failed');
+      if (result.success) {
+        setExistingUploadComplete(true);
+        console.log('Files uploaded successfully to existing case, caseId:', existingCaseId);
       }
-
-      setExistingUploadComplete(true);
 
     } catch (err) {
       console.error('Upload error:', err);

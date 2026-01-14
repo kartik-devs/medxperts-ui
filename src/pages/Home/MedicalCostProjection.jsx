@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Upload, X, CheckCircle2, Copy, ChevronDown, Zap } from 'lucide-react';
 import { searchCaseIds, addCaseToLocalStorage, getAllCaseIds, testAPIConnection } from '../../contexts/search-case';
+import { generateMCPCase, uploadMCPFiles, uploadToExistingMCPCase } from '../../contexts/Homeroute/MedicalCostProjection';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || '';
 
@@ -95,50 +96,21 @@ export default function MedicalCostProjectionPage() {
     setUploadComplete(false);
 
     try {
-      console.log('[MCP] Generating case ID via workflow...');
-      
-      const res = await fetch('https://n8n.datakernels.in/webhook/awscrm', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          fullName,
-          gender,
-          maritalStatus,
-          ethnicity,
-          dateOfBirth,
-          email,
-          source: 'mcp_generate_case'
-        }),
+      const result = await generateMCPCase({
+        fullName,
+        gender,
+        maritalStatus,
+        ethnicity,
+        dateOfBirth,
+        email
       });
 
-      // Handle empty or non-JSON response
-      const responseText = await res.text();
-      let data = {};
-      
-      try {
-        data = responseText ? JSON.parse(responseText) : {};
-      } catch (e) {
-        console.log('[MCP] Non-JSON response:', responseText);
-        // If the response is not JSON but the status is OK, consider it a success
-        if (res.ok) {
-          alert('Workflow triggered successfully! Please check your email or dashboard for updates.');
-          return;
-        }
-      }
-
-      console.log('[MCP] Workflow response:', data);
-
-      if (!res.ok) {
-        throw new Error(data.error || `Workflow failed with status ${res.status}`);
-      }
-
-      // Check if workflow returned a case ID
-      if (data.caseId) {
-        setGeneratedCaseId(data.caseId);
+      if (result.caseId) {
+        setGeneratedCaseId(result.caseId);
         
         // Store in localStorage for future use
         addCaseToLocalStorage({
-          caseId: data.caseId,
+          caseId: result.caseId,
           patientName: fullName,
           submittedAt: new Date().toISOString(),
           gender,
@@ -148,8 +120,8 @@ export default function MedicalCostProjectionPage() {
           ethnicity
         });
       } else {
-        // If no case ID returned, show success message but don't proceed to upload
-        alert('Workflow triggered successfully! Please check your email or dashboard for updates.');
+        // If no case ID returned, show success message
+        alert(result.message);
       }
 
     } catch (err) {
@@ -174,67 +146,23 @@ const handleUpload = async () => {
   setIsUploading(true);
 
   try {
-    const formData = new FormData();
-    formData.append('caseId', generatedCaseId);
-    formData.append('fullName', fullName);
-    formData.append('gender', gender);
-    formData.append('maritalStatus', maritalStatus);
-    formData.append('ethnicity', ethnicity);
-    formData.append('dateOfBirth', dateOfBirth);
-    formData.append('email', email);
-    
-    // Add all files to FormData
-    files.forEach((file) => {
-      formData.append('file', file);
+    const result = await uploadMCPFiles(generatedCaseId, files, {
+      fullName,
+      gender,
+      maritalStatus,
+      ethnicity,
+      dateOfBirth,
+      email
     });
 
-    console.log('Sending files to Upload webhook...', {
-      caseId: generatedCaseId,
-      fileCount: files.length,
-      fileNames: files.map(f => f.name)
-    });
-
-    const res = await fetch('https://n8n.datakernels.in/webhook/Upload', {
-      method: 'POST',
-      body: formData,
-    });
-
-    // Handle empty or non-JSON response
-    const responseText = await res.text();
-    let responseData = {};
-    
-    try {
-      responseData = responseText ? JSON.parse(responseText) : {};
-    } catch (e) {
-      console.log('Non-JSON response:', responseText);
-      // If the response is not JSON but the status is OK, consider it a success
-      if (res.ok) {
-        setUploadComplete(true);
-        console.log('Files uploaded successfully to Upload webhook, caseId:', generatedCaseId);
-        return;
-      }
+    if (result.success) {
+      setUploadComplete(true);
+      console.log('Files uploaded successfully, caseId:', generatedCaseId);
     }
-
-    console.log('[MCP] n8n webhook response:', responseData);
-
-    if (!res.ok) {
-      throw new Error(responseData.error || `Upload failed with status ${res.status}`);
-    }
-
-    // If we get here, the upload was successful
-    setUploadComplete(true);
-    console.log('Files uploaded successfully to Upload webhook, caseId:', generatedCaseId);
 
   } catch (err) {
     console.error('Upload error:', err);
-    const errorMessage = err.message || 'Unknown error occurred during upload';
-    alert(`Upload failed: ${errorMessage}`);
-    
-    console.error('Upload error details:', {
-      caseId: generatedCaseId,
-      error: errorMessage,
-      timestamp: new Date().toISOString()
-    });
+    alert(`Upload failed: ${err.message}`);
   } finally {
     setIsUploading(false);
   }
@@ -404,49 +332,16 @@ const handleUpload = async () => {
       alert('Please select a Case ID');
       return;
     }
-    // Removed file count validation - allow 0 files
 
     setIsUploadingExisting(true);
 
     try {
-      const fd = new FormData();
-      fd.append('caseId', existingCaseId);
-      fd.append('isAdditionalUpload', 'true');
-      
-      // Add files if any exist
-      existingFiles.forEach((file) => {
-        fd.append('attachments', file);
-      });
+      const result = await uploadToExistingMCPCase(existingCaseId, existingFiles);
 
-      // Use the Upload webhook URL
-      const res = await fetch('https://n8n.datakernels.in/webhook/Upload', {
-        method: 'POST',
-        body: fd,
-      });
-
-      // Handle empty or non-JSON response
-      const responseText = await res.text();
-      let data = {};
-      
-      try {
-        data = responseText ? JSON.parse(responseText) : {};
-      } catch (e) {
-        console.log('[MCP] Non-JSON response from existing case upload:', responseText);
-        // If the response is not JSON but the status is OK, consider it a success
-        if (res.ok) {
-          setExistingUploadComplete(true);
-          console.log('Files uploaded successfully to existing case, caseId:', existingCaseId);
-          return;
-        }
+      if (result.success) {
+        setExistingUploadComplete(true);
+        console.log('Files uploaded successfully to existing case, caseId:', existingCaseId);
       }
-
-      console.log('[MCP] Upload to existing case response:', data);
-
-      if (!res.ok) {
-        throw new Error(data.error || `Upload failed with status ${res.status}`);
-      }
-
-      setExistingUploadComplete(true);
 
     } catch (err) {
       console.error('Upload error:', err);

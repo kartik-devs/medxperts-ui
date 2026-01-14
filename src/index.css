@@ -2,9 +2,24 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Ensure pages always start from top */
+html {
+  scroll-behavior: smooth;
+}
+
 /* Prevent horizontal scrollbars */
 html, body {
   overflow-x: hidden;
+}
+
+/* Reset scroll position on page load */
+body {
+  font-family: 'Inter', sans-serif;
+}
+
+/* Ensure main content starts from top */
+main {
+  scroll-behavior: smooth;
 }
 
 /* Custom scrollbar styles for better UX */

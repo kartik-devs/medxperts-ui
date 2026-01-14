@@ -1,118 +1,209 @@
-// API Configuration for Life Care Plan n8n Integration
-// This file contains the API logic for connecting to n8n webhook
+// LCP N8N Workflow Integration
+// Direct webhook triggering for Life Care Plan workflows
 
-// Use server proxy to avoid CORS issues
-const API_BASE = import.meta.env.VITE_API_BASE_URL || '';
-const LCP_UPLOAD_URL = `${API_BASE}/api/lcp-upload`;
+// N8N Webhook URLs from environment variables
+const N8N_GENERATE_WORKFLOW = import.meta.env.VITE_N8N_WEBHOOK_URL_LCP ;
+const N8N_UPLOAD_WEBHOOK = import.meta.env.VITE_N8N_WEBHOOK_URL_UPLOAD ;
 
-// API function to send data via server proxy
-export const sendToN8nWebhook = async (formData) => {
-  console.log('🚀 Sending to LCP webhook via proxy:', LCP_UPLOAD_URL);
+/**
+ * STEP 1: Generate Case ID via N8N Workflow
+ * Triggers the workflow to create a new LCP case
+ */
+export const generateLCPCase = async (patientData) => {
+  console.log('[LCP] Generating case ID via workflow...');
   
   try {
-    const response = await fetch(LCP_UPLOAD_URL, {
+    const res = await fetch(N8N_GENERATE_WORKFLOW, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        fullName: patientData.fullName,
+        gender: patientData.gender,
+        maritalStatus: patientData.maritalStatus,
+        ethnicity: patientData.ethnicity,
+        dateOfBirth: patientData.dateOfBirth,
+        email: patientData.email,
+        source: 'lcp_generate_case'
+      }),
+    });
+
+    // Handle empty or non-JSON response
+    const responseText = await res.text();
+    let data = {};
+    
+    try {
+      data = responseText ? JSON.parse(responseText) : {};
+    } catch (e) {
+      console.log('[LCP] Non-JSON response:', responseText);
+      // If the response is not JSON but the status is OK, consider it a success
+      if (res.ok) {
+        return {
+          success: true,
+          message: 'Workflow triggered successfully! Please check your email or dashboard for updates.',
+          caseId: null
+        };
+      }
+    }
+
+    console.log('[LCP] Workflow response:', data);
+
+    if (!res.ok) {
+      throw new Error(data.error || `Workflow failed with status ${res.status}`);
+    }
+
+    // Check if workflow returned a case ID
+    if (data.caseId) {
+      return {
+        success: true,
+        caseId: data.caseId,
+        message: 'Case ID generated successfully'
+      };
+    } else {
+      return {
+        success: true,
+        message: 'Workflow triggered successfully! Please check your email or dashboard for updates.',
+        caseId: null
+      };
+    }
+
+  } catch (err) {
+    console.error('[LCP] Workflow trigger error:', err);
+    throw new Error(`Failed to trigger workflow: ${err.message}`);
+  }
+};
+
+/**
+ * STEP 2: Upload Files to S3 via N8N Webhook
+ * Uploads documents for a case
+ */
+export const uploadLCPFiles = async (caseId, files, patientData) => {
+  console.log('[LCP] Uploading files to S3...', {
+    caseId,
+    fileCount: files.length,
+    fileNames: files.map(f => f.name)
+  });
+
+  try {
+    const formData = new FormData();
+    formData.append('caseId', caseId);
+    formData.append('fullName', patientData.fullName);
+    formData.append('gender', patientData.gender);
+    formData.append('maritalStatus', patientData.maritalStatus);
+    formData.append('ethnicity', patientData.ethnicity);
+    formData.append('dateOfBirth', patientData.dateOfBirth);
+    formData.append('email', patientData.email);
+    
+    // Add all files to FormData
+    files.forEach((file) => {
+      formData.append('file', file);
+    });
+
+    const res = await fetch(N8N_UPLOAD_WEBHOOK, {
       method: 'POST',
       body: formData,
     });
 
-    console.log('📡 LCP response status:', response.status);
-
-    const text = await response.text();
-    console.log('📡 LCP response text:', text);
+    // Handle empty or non-JSON response
+    const responseText = await res.text();
+    let responseData = {};
     
-    let data;
     try {
-      data = JSON.parse(text);
-    } catch {
-      data = { raw: text };
+      responseData = responseText ? JSON.parse(responseText) : {};
+    } catch (e) {
+      console.log('[LCP] Non-JSON response:', responseText);
+      // If the response is not JSON but the status is OK, consider it a success
+      if (res.ok) {
+        return {
+          success: true,
+          message: 'Files uploaded successfully to S3'
+        };
+      }
     }
 
-    if (!response.ok) {
-      console.error('❌ LCP webhook error:', response.status, data);
-      throw new Error(`Webhook error ${response.status}: ${data.raw || response.statusText}`);
+    console.log('[LCP] Upload webhook response:', responseData);
+
+    if (!res.ok) {
+      throw new Error(responseData.error || `Upload failed with status ${res.status}`);
     }
 
-    console.log('✅ LCP webhook success:', data);
     return {
       success: true,
-      data: data.data || data,
-      status: response.status
+      message: 'Files uploaded successfully to S3'
     };
+
   } catch (err) {
-    console.error('❌ Error calling LCP webhook:', err);
-    throw new Error(`Failed to reach workflow: ${err.message}`);
+    console.error('[LCP] Upload error:', err);
+    throw new Error(`Upload failed: ${err.message}`);
   }
 };
 
-// Helper function to create form data for new patient
-export const createNewPatientFormData = (files, metadata) => {
-  const formData = new FormData();
-  
-  // Add metadata
-  formData.append('mode', 'new');
-  formData.append('workflowVersion', metadata.workflowVersion || 'LCP V3 (latest)');
-  formData.append('reportVersion', metadata.reportVersion || 'LCP REPORT');
-  
-  // Add timestamp
-  formData.append('timestamp', new Date().toISOString());
-  
-  // Add files
-  files.forEach((file, index) => {
-    formData.append('files', file, file.name);
-    formData.append(`fileName_${index}`, file.name);
-    formData.append(`fileSize_${index}`, file.size.toString());
-  });
-  
-  return formData;
-};
+/**
+ * Upload Additional Files to Existing Case
+ */
+export const uploadToExistingLCPCase = async (caseId, files) => {
+  console.log('[LCP] Uploading additional files to existing case:', caseId);
 
-// Helper function to create form data for existing patient
-export const createExistingPatientFormData = (caseId, files, metadata) => {
-  const formData = new FormData();
-  
-  // Add metadata
-  formData.append('mode', 'existing');
-  formData.append('caseId', caseId);
-  formData.append('workflowVersion', metadata.workflowVersion || 'LCP V3 (latest)');
-  formData.append('reportVersion', metadata.reportVersion || 'LCP REPORT');
-  formData.append('batchMode', metadata.batchMode ? 'true' : 'false');
-  
-  // Add timestamp
-  formData.append('timestamp', new Date().toISOString());
-  
-  // Add files if any
-  if (files && files.length > 0) {
-    files.forEach((file, index) => {
-      formData.append('files', file, file.name);
-      formData.append(`fileName_${index}`, file.name);
-      formData.append(`fileSize_${index}`, file.size.toString());
-    });
-  }
-  
-  return formData;
-};
-
-// Main API functions
-export const processNewPatient = async (files, metadata) => {
-  const formData = createNewPatientFormData(files, metadata);
-  return await sendToN8nWebhook(formData);
-};
-
-export const processExistingPatient = async (caseId, files, metadata) => {
-  const formData = createExistingPatientFormData(caseId, files, metadata);
-  return await sendToN8nWebhook(formData);
-};
-
-// Test function to verify webhook connectivity
-export const testWebhookConnection = async () => {
   try {
-    const testFormData = new FormData();
-    testFormData.append('test', 'true');
-    testFormData.append('timestamp', new Date().toISOString());
+    const formData = new FormData();
+    formData.append('caseId', caseId);
+    formData.append('isAdditionalUpload', 'true');
     
-    const response = await fetch(LCP_UPLOAD_URL, {
+    // Add files if any exist
+    files.forEach((file) => {
+      formData.append('attachments', file);
+    });
+
+    const res = await fetch(N8N_UPLOAD_WEBHOOK, {
       method: 'POST',
-      body: testFormData,
+      body: formData,
+    });
+
+    // Handle empty or non-JSON response
+    const responseText = await res.text();
+    let data = {};
+    
+    try {
+      data = responseText ? JSON.parse(responseText) : {};
+    } catch (e) {
+      console.log('[LCP] Non-JSON response from existing case upload:', responseText);
+      // If the response is not JSON but the status is OK, consider it a success
+      if (res.ok) {
+        return {
+          success: true,
+          message: 'Files uploaded successfully to existing case'
+        };
+      }
+    }
+
+    console.log('[LCP] Upload to existing case response:', data);
+
+    if (!res.ok) {
+      throw new Error(data.error || `Upload failed with status ${res.status}`);
+    }
+
+    return {
+      success: true,
+      message: 'Files uploaded successfully to existing case'
+    };
+
+  } catch (err) {
+    console.error('[LCP] Upload error:', err);
+    throw new Error(`Upload failed: ${err.message}`);
+  }
+};
+
+/**
+ * Test N8N Webhook Connectivity
+ */
+export const testLCPWebhookConnection = async () => {
+  try {
+    const response = await fetch(N8N_GENERATE_WORKFLOW, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        test: true,
+        timestamp: new Date().toISOString()
+      }),
     });
     
     return {
@@ -129,5 +220,5 @@ export const testWebhookConnection = async () => {
   }
 };
 
-// Export the webhook URL for direct access if needed
-export { LCP_UPLOAD_URL };
+// Export webhook URLs for reference
+export { N8N_GENERATE_WORKFLOW, N8N_UPLOAD_WEBHOOK };

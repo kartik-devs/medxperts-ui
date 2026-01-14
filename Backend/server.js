@@ -11,7 +11,7 @@ import multer from 'multer';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { S3Client, ListObjectsV2Command, GetObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, ListObjectsV2Command, GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 import dotenv from 'dotenv';
 import FormData from 'form-data';
 import xlsx from 'xlsx';
@@ -48,35 +48,110 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization', 'x-user-email']
 }));
 
-/* -------------------- MCP PROGRESS STORE --------------------------- */
+/* -------------------- MCP PROGRESS STORE (S3-BASED) --------------- */
 const mcpProgressStore = new Map();
-const PROGRESS_FILE = './mcp-progress.json';
+const S3_PROGRESS_BUCKET = process.env.S3_PROGRESS_BUCKET || 'finallcpreports';
 
-function loadProgressFromFile() {
+/**
+ * Save progress to S3 at progress/{caseId}.json
+ */
+async function saveProgressToS3(caseId, progressData) {
   try {
-    if (fs.existsSync(PROGRESS_FILE)) {
-      const data = fs.readFileSync(PROGRESS_FILE, 'utf8');
-      const progressData = JSON.parse(data);
-      Object.entries(progressData).forEach(([caseId, d]) => {
-        mcpProgressStore.set(caseId, d);
-      });
-      console.log(`📋 Loaded ${mcpProgressStore.size} progress records`);
+    const s3Key = `progress/${caseId}.json`;
+    
+    const command = new PutObjectCommand({
+      Bucket: S3_PROGRESS_BUCKET,
+      Key: s3Key,
+      Body: JSON.stringify(progressData, null, 2),
+      ContentType: 'application/json',
+      // Add metadata for easier querying
+      Metadata: {
+        caseId: caseId,
+        status: progressData.status || 'UNKNOWN',
+        lastUpdated: Date.now().toString()
+      }
+    });
+
+    await s3.send(command);
+    console.log(`💾 Progress saved to S3: ${S3_PROGRESS_BUCKET}/${s3Key}`);
+    return true;
+  } catch (error) {
+    console.error(`❌ Error saving progress to S3 for case ${caseId}:`, error);
+    return false;
+  }
+}
+
+/**
+ * Load progress from S3 for a specific case
+ */
+async function loadProgressFromS3(caseId) {
+  try {
+    const s3Key = `progress/${caseId}.json`;
+    
+    const command = new GetObjectCommand({
+      Bucket: S3_PROGRESS_BUCKET,
+      Key: s3Key
+    });
+
+    const response = await s3.send(command);
+    const chunks = [];
+    
+    for await (const chunk of response.Body) {
+      chunks.push(chunk);
     }
+    
+    const buffer = Buffer.concat(chunks);
+    const progressData = JSON.parse(buffer.toString());
+    
+    console.log(`📋 Loaded progress from S3 for case ${caseId}`);
+    return progressData;
   } catch (error) {
-    console.error('❌ Error loading progress:', error);
+    if (error.name === 'NoSuchKey') {
+      console.log(`📋 No progress found in S3 for case ${caseId}`);
+      return null;
+    }
+    console.error(`❌ Error loading progress from S3 for case ${caseId}:`, error);
+    return null;
   }
 }
 
-function saveProgressToFile() {
+/**
+ * List all progress files from S3 (for report history)
+ */
+async function listAllProgressFromS3() {
   try {
-    const progressData = Object.fromEntries(mcpProgressStore);
-    fs.writeFileSync(PROGRESS_FILE, JSON.stringify(progressData, null, 2));
+    const command = new ListObjectsV2Command({
+      Bucket: S3_PROGRESS_BUCKET,
+      Prefix: 'progress/',
+      MaxKeys: 1000
+    });
+
+    const response = await s3.send(command);
+    const progressMap = new Map();
+
+    if (response.Contents) {
+      for (const object of response.Contents) {
+        const caseId = object.Key.replace('progress/', '').replace('.json', '');
+        if (caseId) {
+          try {
+            const progressData = await loadProgressFromS3(caseId);
+            if (progressData) {
+              progressMap.set(caseId, progressData);
+            }
+          } catch (error) {
+            console.warn(`⚠️ Failed to load progress for case ${caseId}:`, error.message);
+          }
+        }
+      }
+    }
+
+    console.log(`📋 Loaded ${progressMap.size} progress records from S3`);
+    return progressMap;
   } catch (error) {
-    console.error('❌ Error saving progress:', error);
+    console.error('❌ Error listing progress from S3:', error);
+    return new Map();
   }
 }
-
-loadProgressFromFile();
 
 /* -------------------- MIDDLEWARE FOR AUTH -------------------------- */
 
@@ -338,10 +413,13 @@ function updateMcpProgress(caseId, data) {
     updatedData.completedAt = Date.now();
   }
   
+  // Update in-memory store for fast access
   mcpProgressStore.set(caseId, updatedData);
   
-  // Save to file after each update
-  saveProgressToFile();
+  // Save to S3 asynchronously (don't block the response)
+  saveProgressToS3(caseId, updatedData).catch(error => {
+    console.error(`❌ Failed to save progress to S3 for case ${caseId}:`, error);
+  });
   
   console.log(`📊 Progress updated for case ${caseId}:`, {
     step: updatedData.step,
@@ -351,8 +429,20 @@ function updateMcpProgress(caseId, data) {
   });
 }
 
-function getMcpProgress(caseId) {
-  return mcpProgressStore.get(caseId) || null;
+async function getMcpProgress(caseId) {
+  // First check in-memory cache
+  let progressData = mcpProgressStore.get(caseId);
+  
+  // If not in cache, try to load from S3
+  if (!progressData) {
+    progressData = await loadProgressFromS3(caseId);
+    if (progressData) {
+      // Cache it for future requests
+      mcpProgressStore.set(caseId, progressData);
+    }
+  }
+  
+  return progressData || null;
 }
 
 /* ------------------------------------------------------------------ */
@@ -436,44 +526,6 @@ app.get('/api/search-cases', authenticateUser, async (req, res) => {
     });
   }
 });
-/* ------------------------------------------------------------------ */
-/* --------------- MCP GENERATE CASE ID (Step 1) --------------------- */
-/* ------------------------------------------------------------------ */
-
-app.post('/api/mcp-generate-case', async (req, res) => {
-  console.log(' MCP Generate Case ID received');
-  console.log('Body:', req.body);
-
-  try {
-    const { fullName, gender, maritalStatus, ethnicity } = req.body;
-
-    // Generate unique case ID
-    const timestamp = Date.now().toString(36);
-    const random = Math.random().toString(36).slice(2, 8);
-    const caseId = `CASE-${timestamp}-${random}`.toUpperCase();
-
-    console.log(' Generated Case ID:', caseId);
-
-    // Initialize progress for this case
-    updateMcpProgress(caseId, {
-      step: 'Case Created',
-      progress: 0,
-      status: 'CREATED',
-    });
-
-    res.json({
-      success: true,
-      caseId,
-      patientName: fullName,
-      metadata: { gender, maritalStatus, ethnicity },
-    });
-
-  } catch (err) {
-    console.error(' Generate case error:', err);
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
 /* ------------------------------------------------------------------ */
 /* ---------------- MCP UPLOAD FILES (Step 2) ------------------------ */
 /* ------------------------------------------------------------------ */
@@ -596,14 +648,28 @@ app.post('/api/mcp-generate', (req, res) => {
     lastHeartbeat: Date.now(), // Track last activity
   });
 
-  // ✅ Fire-and-forget n8n trigger
-  fetch('https://n8n-dev.datakernels.in/webhook/0488eff1-3f7b-4000-8acf-db7b94cc2c5a', {
+  // ✅ Fire-and-forget n8n trigger - Use environment variable
+  const n8nGenerateUrl = process.env.N8N_WEBHOOK_URL_MCP_GENERATE || 'https://n8n-dev.datakernels.in/webhook/0488eff1-3f7b-4000-8acf-db7b94cc2c5a';
+  
+  console.log('🔗 N8N Generate URL:', n8nGenerateUrl);
+  console.log('📤 Sending to N8N:', { caseId, patientName });
+  
+  fetch(n8nGenerateUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ caseId, patientName }),
-  }).catch(err => {
+  })
+  .then(response => {
+    console.log('✅ N8N webhook response status:', response.status);
+    return response.text();
+  })
+  .then(text => {
+    console.log('✅ N8N webhook response:', text);
+  })
+  .catch(err => {
     // ⚠️ LOG ONLY — DO NOT FAIL JOB
-    console.warn('⚠️ n8n trigger error (non-fatal):', err.message);
+    console.error('⚠️ n8n trigger error (non-fatal):', err.message);
+    console.error('⚠️ Full error:', err);
     
     // Mark as failed if n8n trigger fails
     updateMcpProgress(caseId, {
@@ -624,7 +690,7 @@ app.post('/api/mcp-generate', (req, res) => {
 /* ------------------------------------------------------------------ */
 
 // Sometimes n8n might send progress updates to the generate endpoint by mistake
-app.post('/api/mcp-generate-progress', (req, res) => {
+app.post('/api/mcp-generate-progress', async (req, res) => {
   console.log('⚠️  Progress update received at generate endpoint, redirecting...');
   
   // Forward to the correct progress endpoint
@@ -632,7 +698,7 @@ app.post('/api/mcp-generate-progress', (req, res) => {
   
   if (caseId && (progress !== undefined || status || step)) {
     try {
-      const existing = getMcpProgress(caseId);
+      const existing = await getMcpProgress(caseId);
       
       const safeProgress =
         typeof progress === 'number'
@@ -675,7 +741,7 @@ app.post('/api/mcp-generate-progress', (req, res) => {
 /* -------- MCP PROGRESS UPDATE (n8n â†’ backend) ---------------------- */
 /* ------------------------------------------------------------------ */
 
-app.post('/api/case-progress', (req, res) => {
+app.post('/api/case-progress', async (req, res) => {
   try {
     console.log('📈 Progress update received:', JSON.stringify(req.body, null, 2));
     console.log('📈 Headers:', JSON.stringify(req.headers, null, 2));
@@ -688,7 +754,7 @@ app.post('/api/case-progress', (req, res) => {
       return res.status(400).json({ error: 'caseId is required' });
     }
 
-    const existing = getMcpProgress(caseId);
+    const existing = await getMcpProgress(caseId);
     console.log('📋 Existing progress for', caseId, ':', existing);
 
     const safeProgress =
@@ -725,10 +791,55 @@ app.post('/api/case-progress', (req, res) => {
   }
 });
 /* ------------------------------------------------------------------ */
+/* -------- DIRECT S3 PROGRESS FETCH (Frontend Direct Access) ------- */
+/* ------------------------------------------------------------------ */
+
+app.get('/api/s3-progress/:caseId', async (req, res) => {
+  try {
+    const { caseId } = req.params;
+    
+    if (!caseId) {
+      return res.status(400).json({ error: 'caseId is required' });
+    }
+
+    // Load progress directly from S3
+    const progressData = await loadProgressFromS3(caseId);
+
+    if (!progressData) {
+      return res.json({
+        caseId,
+        progress: 0,
+        step: 'Waiting',
+        status: 'PROCESSING',
+        pdf_url: null,
+        source: 'default'
+      });
+    }
+
+    res.json({
+      caseId: progressData.caseId,
+      progress: progressData.progress,
+      step: progressData.step,
+      status: progressData.status,
+      pdf_url: progressData.pdf_url || progressData.reportUrl || null,
+      lastUpdated: progressData.lastUpdated,
+      updatedAt: progressData.updatedAt,
+      source: 's3'
+    });
+  } catch (error) {
+    console.error('❌ Error fetching S3 progress:', error);
+    res.status(500).json({ 
+      error: 'Internal server error',
+      message: error.message 
+    });
+  }
+});
+
+/* ------------------------------------------------------------------ */
 /* -------- MCP PROGRESS FETCH (Frontend Polling) -------------------- */
 /* ------------------------------------------------------------------ */
 
-app.get('/api/case-status', (req, res) => {
+app.get('/api/case-status', async (req, res) => {
   try {
     const { caseId } = req.query;
     
@@ -736,7 +847,7 @@ app.get('/api/case-status', (req, res) => {
       return res.status(400).json({ error: 'caseId is required' });
     }
 
-    const data = getMcpProgress(caseId);
+    const data = await getMcpProgress(caseId);
 
     if (!data) {
       return res.json({
@@ -767,42 +878,6 @@ app.get('/api/case-status', (req, res) => {
 /* ------------------------------------------------------------------ */
 /* -------------------- LCP WEBHOOK (Trigger n8n) -------------------- */
 /* ------------------------------------------------------------------ */
-
-/* -------------------- LCP GENERATE CASE ID (Step 1) ---------------- */
-app.post('/api/lcp-generate-case', async (req, res) => {
-  console.log('🔹 LCP Generate Case ID received');
-  console.log('Body:', req.body);
-
-  try {
-    const { fullName, gender, maritalStatus, ethnicity } = req.body;
-
-    // Generate unique case ID
-    const timestamp = Date.now().toString(36);
-    const random = Math.random().toString(36).slice(2, 8);
-    const caseId = `LCP-${timestamp}-${random}`.toUpperCase();
-
-    console.log('🔹 Generated LCP Case ID:', caseId);
-
-    // Initialize progress for this case (similar to MCP)
-    // Note: You may want to create an updateLcpProgress function similar to updateMcpProgress
-    // updateLcpProgress(caseId, {
-    //   step: 'Case Created',
-    //   progress: 0,
-    //   status: 'CREATED',
-    // });
-
-    res.json({
-      success: true,
-      caseId,
-      patientName: fullName,
-      metadata: { gender, maritalStatus, ethnicity },
-    });
-
-  } catch (err) {
-    console.error('🔹 Generate LCP case error:', err);
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
 
 /* -------------------- LCP TEST ENDPOINT (Debug) -------------------- */
 app.get('/api/lcp-test', (req, res) => {
@@ -887,6 +962,215 @@ hasSecretKey: !!process.env.AWS_SECRET_ACCESS_KEY,
 
 
 /* ------------------------------------------------------------------ */
+/* -------------------- DASHBOARD STATISTICS ------------------------- */
+/* ------------------------------------------------------------------ */
+
+app.get('/api/dashboard-stats', authenticateUser, async (req, res) => {
+  try {
+    const userEmail = req.userEmail;
+    console.log(`📊 Dashboard stats requested by: ${userEmail}`);
+
+    // Load all progress data from S3
+    const allProgressData = await listAllProgressFromS3();
+    
+    // Get user's allowed case IDs
+    const userCaseIds = await getUserCaseIds(userEmail);
+    
+    // Filter progress data for user's accessible cases
+    const userProgress = [];
+    for (const [caseId, progressData] of allProgressData.entries()) {
+      const hasAccess = await hasAccessToCase(userEmail, caseId);
+      const userInitiated = progressData.initiatedBy === userEmail || progressData.userEmail === userEmail;
+      
+      if (hasAccess || userInitiated) {
+        userProgress.push(progressData);
+      }
+    }
+
+    // Get active cases with details
+    const activeCasesData = userProgress.filter(p => 
+      ['CREATED', 'PENDING', 'PROCESSING'].includes(p.status)
+    );
+
+    // Get in progress cases with details
+    const inProgressData = userProgress.filter(p => 
+      p.status === 'PROCESSING'
+    );
+
+    // Get completed cases with details
+    const completedData = userProgress.filter(p => 
+      p.status === 'COMPLETED'
+    );
+
+    // Get issues cases with details
+    const issuesData = userProgress.filter(p => 
+      ['FAILED', 'ERROR'].includes(p.status)
+    );
+
+    // Calculate statistics
+    const stats = {
+      activeCases: activeCasesData.length,
+      inProgress: inProgressData.length,
+      completed: completedData.length,
+      issues: issuesData.length
+    };
+
+    // Prepare case lists with details
+    const caseLists = {
+      activeCases: activeCasesData.map(p => ({
+        caseId: p.caseId,
+        status: p.status,
+        progress: p.progress || 0,
+        step: p.step || 'Unknown',
+        type: p.caseId.toUpperCase().includes('LCP') ? 'LCP' : 'MCP',
+        lastUpdated: p.lastUpdated || p.timestamp
+      })),
+      inProgress: inProgressData.map(p => ({
+        caseId: p.caseId,
+        status: p.status,
+        progress: p.progress || 0,
+        step: p.step || 'Unknown',
+        type: p.caseId.toUpperCase().includes('LCP') ? 'LCP' : 'MCP',
+        lastUpdated: p.lastUpdated || p.timestamp
+      })),
+      completed: completedData.map(p => ({
+        caseId: p.caseId,
+        status: p.status,
+        progress: 100,
+        step: 'Completed',
+        type: p.caseId.toUpperCase().includes('LCP') ? 'LCP' : 'MCP',
+        completedAt: p.completedAt || p.lastUpdated || p.timestamp
+      })),
+      issues: issuesData.map(p => ({
+        caseId: p.caseId,
+        status: p.status,
+        progress: p.progress || 0,
+        step: p.step || 'Failed',
+        type: p.caseId.toUpperCase().includes('LCP') ? 'LCP' : 'MCP',
+        failedAt: p.lastUpdated || p.timestamp
+      }))
+    };
+
+    // Calculate breakdown by type
+    const breakdown = {
+      byType: {
+        MCP: {
+          active: userProgress.filter(p => 
+            p.caseId.toUpperCase().includes('MCP') && 
+            ['CREATED', 'PENDING', 'PROCESSING'].includes(p.status)
+          ).length,
+          inProgress: userProgress.filter(p => 
+            p.caseId.toUpperCase().includes('MCP') && 
+            p.status === 'PROCESSING'
+          ).length,
+          completed: userProgress.filter(p => 
+            p.caseId.toUpperCase().includes('MCP') && 
+            p.status === 'COMPLETED'
+          ).length,
+          issues: userProgress.filter(p => 
+            p.caseId.toUpperCase().includes('MCP') && 
+            ['FAILED', 'ERROR'].includes(p.status)
+          ).length
+        },
+        LCP: {
+          active: userProgress.filter(p => 
+            p.caseId.toUpperCase().includes('LCP') && 
+            ['CREATED', 'PENDING', 'PROCESSING'].includes(p.status)
+          ).length,
+          inProgress: userProgress.filter(p => 
+            p.caseId.toUpperCase().includes('LCP') && 
+            p.status === 'PROCESSING'
+          ).length,
+          completed: userProgress.filter(p => 
+            p.caseId.toUpperCase().includes('LCP') && 
+            p.status === 'COMPLETED'
+          ).length,
+          issues: userProgress.filter(p => 
+            p.caseId.toUpperCase().includes('LCP') && 
+            ['FAILED', 'ERROR'].includes(p.status)
+          ).length
+        }
+      },
+      byStatus: {
+        CREATED: userProgress.filter(p => p.status === 'CREATED').length,
+        PENDING: userProgress.filter(p => p.status === 'PENDING').length,
+        PROCESSING: userProgress.filter(p => p.status === 'PROCESSING').length,
+        COMPLETED: userProgress.filter(p => p.status === 'COMPLETED').length,
+        FAILED: userProgress.filter(p => ['FAILED', 'ERROR'].includes(p.status)).length
+      }
+    };
+
+    // Get recent activity (last 10 updates)
+    const recentActivity = userProgress
+      .sort((a, b) => (b.lastUpdated || b.timestamp) - (a.lastUpdated || a.timestamp))
+      .slice(0, 10)
+      .map(p => {
+        const timestamp = p.lastUpdated || p.timestamp || Date.now();
+        const timeAgo = getTimeAgo(timestamp);
+        
+        let action = 'Unknown';
+        if (p.status === 'COMPLETED') action = 'Report Generated';
+        else if (p.status === 'PROCESSING') action = 'Processing';
+        else if (p.status === 'FAILED' || p.status === 'ERROR') action = 'Failed';
+        else if (p.status === 'PENDING') action = 'Review Required';
+        else if (p.status === 'CREATED') action = 'Case Created';
+        
+        const type = p.caseId.toUpperCase().includes('LCP') ? 'LCP' : 'MCP';
+        
+        return {
+          caseId: p.caseId,
+          action,
+          type,
+          status: p.status,
+          step: p.step,
+          progress: p.progress || 0,
+          timestamp,
+          timeAgo,
+          userEmail: p.userEmail || p.initiatedBy
+        };
+      });
+
+    console.log(`✅ Dashboard stats calculated for ${userEmail}:`, stats);
+
+    res.json({
+      success: true,
+      stats,
+      caseLists,
+      breakdown,
+      recentActivity,
+      userEmail,
+      totalCasesAccess: userCaseIds.length,
+      assignedCaseIds: userCaseIds, // All case IDs user has access to
+      timestamp: Date.now()
+    });
+
+  } catch (error) {
+    console.error('❌ Error fetching dashboard stats:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch dashboard statistics',
+      message: error.message
+    });
+  }
+});
+
+// Helper function to calculate time ago
+function getTimeAgo(timestamp) {
+  const now = Date.now();
+  const diff = now - timestamp;
+  
+  const seconds = Math.floor(diff / 1000);
+  const minutes = Math.floor(seconds / 60);
+  const hours = Math.floor(minutes / 60);
+  const days = Math.floor(hours / 24);
+  
+  if (days > 0) return `${days} day${days > 1 ? 's' : ''} ago`;
+  if (hours > 0) return `${hours} hour${hours > 1 ? 's' : ''} ago`;
+  if (minutes > 0) return `${minutes} minute${minutes > 1 ? 's' : ''} ago`;
+  return 'Just now';
+}
+
+/* ------------------------------------------------------------------ */
 /* -------------------- MANUAL CASE STATUS UPDATE ------------------- */
 /* ------------------------------------------------------------------ */
 
@@ -905,7 +1189,7 @@ app.post('/api/update-case-status', authenticateUser, async (req, res) => {
 
     // Check if user has access to this case
     const hasAccess = await hasAccessToCase(userEmail, caseId);
-    const existingData = getMcpProgress(caseId);
+    const existingData = await getMcpProgress(caseId);
     const userInitiated = existingData?.userEmail === userEmail || existingData?.initiatedBy === userEmail;
 
     if (!hasAccess && !userInitiated) {
@@ -955,10 +1239,12 @@ app.get('/api/report-history', authenticateUser, async (req, res) => {
     const userEmail = req.userEmail;
     const reports = [];
 
-    console.log('📋 Checking progress store with', mcpProgressStore.size, 'entries');
+    // Load all progress data from S3
+    const allProgressData = await listAllProgressFromS3();
+    console.log('📋 Checking progress data with', allProgressData.size, 'entries');
 
     // Convert progress data to report format
-    for (const [caseId, progressData] of mcpProgressStore.entries()) {
+    for (const [caseId, progressData] of allProgressData.entries()) {
       // Check if user has access to this case
       const hasAccess = await hasAccessToCase(userEmail, caseId);
       const userInitiated = progressData.initiatedBy === userEmail || progressData.userEmail === userEmail;
@@ -1445,7 +1731,56 @@ app.get('/api/debug-excel', authenticateUser, async (req, res) => {
   }
 });
 
+/* ------------------------------------------------------------------ */
+/* -------------------- DIAGNOSTIC ENDPOINTS ------------------------- */
+/* ------------------------------------------------------------------ */
+
+// Test N8N webhook connectivity
+app.get('/api/test-n8n', async (req, res) => {
+  const n8nGenerateUrl = process.env.N8N_WEBHOOK_URL_MCP_GENERATE || 'https://n8n-dev.datakernels.in/webhook/0488eff1-3f7b-4000-8acf-db7b94cc2c5a';
+  
+  console.log('🧪 Testing N8N connectivity...');
+  console.log('🔗 URL:', n8nGenerateUrl);
+  
+  try {
+    const startTime = Date.now();
+    const response = await fetch(n8nGenerateUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        test: true,
+        timestamp: new Date().toISOString(),
+        source: 'backend_diagnostic'
+      }),
+    });
+    
+    const duration = Date.now() - startTime;
+    const responseText = await response.text();
+    
+    res.json({
+      success: true,
+      url: n8nGenerateUrl,
+      status: response.status,
+      statusText: response.statusText,
+      duration: `${duration}ms`,
+      response: responseText.substring(0, 500),
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('❌ N8N test failed:', error);
+    res.status(500).json({
+      success: false,
+      url: n8nGenerateUrl,
+      error: error.message,
+      errorType: error.constructor.name,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+/* ------------------------------------------------------------------ */
 /* ------------------------- START SERVER ---------------------------- */
+/* ------------------------------------------------------------------ */
 app.listen(PORT, () => {
   console.log(`🚀 MCP API running on port ${PORT}`);
 });
