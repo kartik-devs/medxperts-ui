@@ -1459,7 +1459,7 @@ app.post('/api/get-case-documents', authenticateUser, async (req, res) => {
               name: fileName,
               fileName: fileName,
               s3Key: file.Key,
-              url: `${API_BASE || 'http://localhost:3001'}/api/view-document/${location.bucket}/${encodeURIComponent(file.Key)}?userEmail=${encodeURIComponent(userEmail)}`,
+              url: `${API_BASE || 'http://localhost:3001'}/api/view-document/${location.bucket}/${file.Key}?userEmail=${encodeURIComponent(userEmail)}`,
               directUrl: `https://${location.bucket}.s3.amazonaws.com/${file.Key}`,
               bucket: location.bucket,
               size: file.Size,
