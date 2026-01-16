@@ -555,7 +555,7 @@ const OperationsDashboard = () => {
 
       const API_URL = import.meta.env.VITE_API_BASE_URL || 
                      import.meta.env.VITE_API_BASE_URL_PRODUCTION || 
-                     'https://medxperts-backend.onrender.com';
+                     'https://medxperts-ui.onrender.com';
 
       console.log('📊 Fetching dashboard stats for:', userEmail);
 

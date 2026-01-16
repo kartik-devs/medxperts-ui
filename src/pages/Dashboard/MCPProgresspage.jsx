@@ -4,7 +4,7 @@ import { ChevronLeft, CheckCircle2, AlertCircle } from 'lucide-react';
 const API_BASE =
   import.meta.env.VITE_API_BASE_URL || 
   import.meta.env.VITE_API_BASE_URL_PRODUCTION || 
-  'https://medxperts-backend.onrender.com';
+  'https://medxperts-ui.onrender.com';
 
 console.log('API_BASE configured as:', API_BASE);
 

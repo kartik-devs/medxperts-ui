@@ -5,7 +5,7 @@
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 
                      import.meta.env.VITE_API_BASE_URL_PRODUCTION || 
-                     'https://medxperts-backend.onrender.com';
+                     'https://medxperts-ui.onrender.com';
 
 // Get current user email from Firebase auth
 function getCurrentUserEmail() {

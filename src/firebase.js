@@ -5,13 +5,13 @@ import { getStorage } from "firebase/storage";
 import { getAnalytics } from "firebase/analytics";
 
 const firebaseConfig = {
-  apiKey: "AIzaSyDgbBshRVDCM-j31eFvZOLGkn8uX18O3cY",
-  authDomain: "medtry-96b07.firebaseapp.com",
-  projectId: "medtry-96b07",
-  storageBucket: "medtry-96b07.appspot.com",
-  messagingSenderId: "412287546354",
-  appId: "1:412287546354:web:ce0d614e08f4f85cd1316b",
-  measurementId: "G-46PKKWDN1T"
+  apiKey: import.meta.env.REACT_APP_FIREBASE_API_KEY,
+  authDomain: import.meta.env.REACT_APP_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.REACT_APP_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.REACT_APP_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.REACT_APP_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.REACT_APP_FIREBASE_APP_ID,
+  measurementId: import.meta.env.REACT_APP_FIREBASE_MEASUREMENT_ID
 };
 
 // Initialize Firebase

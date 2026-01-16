@@ -18,7 +18,7 @@ import {
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 
                  import.meta.env.VITE_API_BASE_URL_PRODUCTION || 
-                 'https://medxperts-backend.onrender.com';
+                 'https://medxperts-ui.onrender.com';
 
 // Add deployment detection
 const isDeployment = window.location.hostname.includes('render.com') || 
