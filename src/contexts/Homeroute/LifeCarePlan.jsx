@@ -22,6 +22,7 @@ export const generateLCPCase = async (patientData) => {
         maritalStatus: patientData.maritalStatus,
         ethnicity: patientData.ethnicity,
         dateOfBirth: patientData.dateOfBirth,
+        injuryDate: patientData.injuryDate,
         email: patientData.email,
         source: 'lcp_generate_case'
       }),
@@ -91,6 +92,7 @@ export const uploadLCPFiles = async (caseId, files, patientData) => {
     formData.append('maritalStatus', patientData.maritalStatus);
     formData.append('ethnicity', patientData.ethnicity);
     formData.append('dateOfBirth', patientData.dateOfBirth);
+    formData.append('injuryDate', patientData.injuryDate);
     formData.append('email', patientData.email);
     
     // Add all files to FormData

@@ -17,6 +17,7 @@ export default function LifeCarePlanPage() {
   const [maritalStatus, setMaritalStatus] = useState('');
   const [ethnicity, setEthnicity] = useState('');
   const [dateOfBirth, setDateOfBirth] = useState('');
+  const [injuryDate, setInjuryDate] = useState('');
   const [email, setEmail] = useState('');
   const [files, setFiles] = useState([]);
   
@@ -78,6 +79,7 @@ export default function LifeCarePlanPage() {
     if (!maritalStatus) return 'Please select marital status.';
     if (!ethnicity) return 'Please select ethnicity.';
     if (!dateOfBirth) return 'Please enter date of birth.';
+    if (!injuryDate) return 'Please enter injury date.';
     if (!email) return 'Please enter email address.';
     if (!/^\S+@\S+\.\S+$/.test(email)) return 'Please enter a valid email address.';
     return null;
@@ -102,6 +104,7 @@ export default function LifeCarePlanPage() {
         maritalStatus,
         ethnicity,
         dateOfBirth,
+        injuryDate,
         email
       });
 
@@ -116,6 +119,7 @@ export default function LifeCarePlanPage() {
           gender,
           maritalStatus,
           dateOfBirth,
+          injuryDate,
           email,
           ethnicity
         });
@@ -152,6 +156,7 @@ const handleUpload = async () => {
       maritalStatus,
       ethnicity,
       dateOfBirth,
+      injuryDate,
       email
     });
 
@@ -176,6 +181,9 @@ const handleUpload = async () => {
     setGender('');
     setMaritalStatus('');
     setEthnicity('');
+    setDateOfBirth('');
+    setInjuryDate('');
+    setEmail('');
   };
 
   // ============ COPY TO CLIPBOARD ============
@@ -430,31 +438,43 @@ const handleUpload = async () => {
             </div>
 
             {/* Ethnicity */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-              <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-2">Ethnicity</label>
-                <select
-                  className="w-full px-4 py-3 rounded-lg bg-white border border-slate-300 text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
-                  value={ethnicity}
-                  onChange={(e) => setEthnicity(e.target.value)}
-                  disabled={!!generatedCaseId}
-                >
-                  <option value="">Select ethnicity</option>
-                  <option value="asian">Asian</option>
-                  <option value="black">Black / African descent</option>
-                  <option value="hispanic">Hispanic / Latino</option>
-                  <option value="white">White / Caucasian</option>
-                  <option value="other">Other</option>
-                </select>
-              </div>
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-2">Ethnicity</label>
+              <select
+                className="w-full px-4 py-3 rounded-lg bg-white border border-slate-300 text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
+                value={ethnicity}
+                onChange={(e) => setEthnicity(e.target.value)}
+                disabled={!!generatedCaseId}
+              >
+                <option value="">Select ethnicity</option>
+                <option value="asian">Asian</option>
+                <option value="black">Black / African descent</option>
+                <option value="hispanic">Hispanic / Latino</option>
+                <option value="white">White / Caucasian</option>
+                <option value="other">Other</option>
+              </select>
+            </div>
 
-              {/* Date of Birth */}
+            {/* Date of Birth & Injury Date */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
               <div>
                 <label className="block text-sm font-semibold text-slate-700 mb-2">Date of Birth</label>
                 <input
                   type="date"
                   value={dateOfBirth}
                   onChange={(e) => setDateOfBirth(e.target.value)}
+                  className="w-full px-4 py-3 rounded-lg bg-white border border-slate-300 text-slate-900 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
+                  max={new Date().toISOString().split('T')[0]}
+                  disabled={!!generatedCaseId}
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 mb-2">Injury Date</label>
+                <input
+                  type="date"
+                  value={injuryDate}
+                  onChange={(e) => setInjuryDate(e.target.value)}
                   className="w-full px-4 py-3 rounded-lg bg-white border border-slate-300 text-slate-900 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
                   max={new Date().toISOString().split('T')[0]}
                   disabled={!!generatedCaseId}

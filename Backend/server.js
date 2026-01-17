@@ -651,13 +651,15 @@ app.post('/api/mcp-generate', (req, res) => {
   // ✅ Fire-and-forget n8n trigger with timeout
   // The workflow takes 1+ hours, so we don't wait for completion
   // Progress updates will come via /api/case-progress endpoint
-  fetch('https://n8n-dev.datakernels.in/webhook/0488eff1-3f7b-4000-8acf-db7b94cc2c5a', {
+  const mcpGenerateUrl = process.env.N8N_WEBHOOK_URL_MCP_GENERATE || 'https://n8n.datakernels.in/webhook-test/0488eff1-3f7b-4000-8acf-db7b94cc2c5a';
+  
+  fetch(mcpGenerateUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ caseId, patientName }),
     signal: AbortSignal.timeout(5000) // Abort after 5 seconds
   }).then(() => {
-    console.log(`✅ n8n webhook triggered successfully for case ${caseId}`);
+    console.log(`✅ n8n webhook triggered successfully for case ${caseId} at ${mcpGenerateUrl}`);
   }).catch(err => {
     // ⚠️ IGNORE ALL ERRORS - This is expected behavior
     // The workflow will still run in n8n and send progress updates
