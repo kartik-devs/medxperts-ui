@@ -651,7 +651,7 @@ app.post('/api/mcp-generate', (req, res) => {
   // ✅ Fire-and-forget n8n trigger with timeout
   // The workflow takes 1+ hours, so we don't wait for completion
   // Progress updates will come via /api/case-progress endpoint
-  const mcpGenerateUrl = process.env.N8N_WEBHOOK_URL_MCP_GENERATE || 'https://n8n.datakernels.in/webhook-test/0488eff1-3f7b-4000-8acf-db7b94cc2c5a';
+  const mcpGenerateUrl = process.env.N8N_WEBHOOK_URL_MCP_GENERATE || 'https://n8n.datakernels.in/webhook/mcp-generate';
   
   fetch(mcpGenerateUrl, {
     method: 'POST',
@@ -1728,7 +1728,7 @@ app.get('/api/debug-excel', authenticateUser, async (req, res) => {
 
 // Test N8N webhook connectivity
 app.get('/api/test-n8n', async (req, res) => {
-  const n8nGenerateUrl = process.env.N8N_WEBHOOK_URL_MCP_GENERATE || 'https://n8n-dev.datakernels.in/webhook/0488eff1-3f7b-4000-8acf-db7b94cc2c5a';
+  const n8nGenerateUrl = process.env.N8N_WEBHOOK_URL_MCP_GENERATE || 'https://n8n.datakernels.in/webhook/mcp-generate';
   
   console.log('🧪 Testing N8N connectivity...');
   console.log('🔗 URL:', n8nGenerateUrl);
