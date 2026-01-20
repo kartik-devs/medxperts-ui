@@ -14,6 +14,8 @@ import {
   XCircle,
   AlertCircle,
   Loader2,
+  Trash2,
+  X,
 } from 'lucide-react';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 
@@ -45,6 +47,7 @@ const ReportHistory = () => {
   const [lastUpdated, setLastUpdated] = useState(null);
   const [processingReports, setProcessingReports] = useState(new Set());
   const [pollingActive, setPollingActive] = useState(false);
+  const [deletingReports, setDeletingReports] = useState(new Set());
 
   // Enhanced error handling with retry logic
   const handleError = useCallback((err, context = 'Unknown') => {
@@ -502,6 +505,73 @@ const ReportHistory = () => {
     }
   }, [navigate]);
 
+  // Delete report handler
+  const handleDeleteReport = useCallback(async (report) => {
+    const confirmMessage = `Are you sure you want to delete this ${report.type} report for case ${report.caseId}?\n\nThis action cannot be undone.`;
+    
+    if (!window.confirm(confirmMessage)) {
+      return;
+    }
+
+    const uniqueKey = report.uniqueKey || `${report.caseId}_${report.generationId || 'legacy'}`;
+    
+    try {
+      setDeletingReports(prev => new Set([...prev, uniqueKey]));
+      
+      const userEmail = localStorage.getItem('userEmail') || 
+                       sessionStorage.getItem('userEmail') || 
+                       window.currentUserEmail;
+
+      console.log('🗑️ Deleting report:', {
+        caseId: report.caseId,
+        generationId: report.generationId,
+        uniqueKey,
+        reportType: report.type
+      });
+
+      // Use POST instead of DELETE to avoid CORS issues
+      const response = await fetch(`${API_BASE}/api/delete-report`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-email': userEmail,
+        },
+        body: JSON.stringify({
+          caseId: report.caseId,
+          generationId: report.generationId,
+          uniqueKey,
+          reportType: report.type
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ message: 'Unknown error' }));
+        throw new Error(errorData.message || `Failed to delete report (${response.status})`);
+      }
+
+      const result = await response.json();
+      console.log('✅ Report deleted successfully:', result);
+
+      // Remove from local state immediately for better UX
+      setReports(prev => prev.filter(r => 
+        (r.uniqueKey || `${r.caseId}_${r.generationId || 'legacy'}`) !== uniqueKey
+      ));
+
+      // Refresh the report list from server
+      setTimeout(() => loadReports(false), 500);
+
+    } catch (err) {
+      console.error('❌ Error deleting report:', err);
+      alert(`Failed to delete report: ${err.message}`);
+    } finally {
+      setDeletingReports(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(uniqueKey);
+        return newSet;
+      });
+    }
+  }, [loadReports]);
+
   // Enhanced status badge with more visual feedback
   const StatusBadge = ({ status, progress, step }) => {
     const getStatusConfig = () => {
@@ -552,6 +622,9 @@ const ReportHistory = () => {
 
   // Enhanced action buttons with better UX
   const ActionButtons = ({ report }) => {
+    const uniqueKey = report.uniqueKey || `${report.caseId}_${report.generationId || 'legacy'}`;
+    const isDeleting = deletingReports.has(uniqueKey);
+    
     if (report.status === 'Processing') {
       return (
         <div className="flex gap-2">
@@ -561,6 +634,14 @@ const ReportHistory = () => {
           >
             <Eye size={16} />
             View Progress
+          </button>
+          <button
+            onClick={() => handleDeleteReport(report)}
+            disabled={isDeleting}
+            className="px-3 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700 transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+            title="Delete this report"
+          >
+            {isDeleting ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
           </button>
         </div>
       );
@@ -585,6 +666,14 @@ const ReportHistory = () => {
               Download
             </button>
           )}
+          <button
+            onClick={() => handleDeleteReport(report)}
+            disabled={isDeleting}
+            className="px-3 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700 transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+            title="Delete this report"
+          >
+            {isDeleting ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
+          </button>
         </div>
       );
     }
@@ -605,17 +694,35 @@ const ReportHistory = () => {
           >
             Retry
           </button>
+          <button
+            onClick={() => handleDeleteReport(report)}
+            disabled={isDeleting}
+            className="px-3 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700 transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+            title="Delete this report"
+          >
+            {isDeleting ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
+          </button>
         </div>
       );
     }
 
     return (
-      <button
-        onClick={() => handleRetry(report)}
-        className="px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700 transition-colors"
-      >
-        Generate Report
-      </button>
+      <div className="flex gap-2">
+        <button
+          onClick={() => handleRetry(report)}
+          className="px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700 transition-colors"
+        >
+          Generate Report
+        </button>
+        <button
+          onClick={() => handleDeleteReport(report)}
+          disabled={isDeleting}
+          className="px-3 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700 transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+          title="Delete this report"
+        >
+          {isDeleting ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
+        </button>
+      </div>
     );
   };
 
