@@ -246,6 +246,7 @@ const handleUpload = async () => {
         body: JSON.stringify({
           caseId: selectedCaseId,
           patientName: '', // Patient name removed from UI
+          reportType: 'MCP'
         }),
       });
 

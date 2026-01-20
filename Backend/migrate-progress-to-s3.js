@@ -65,7 +65,7 @@ async function migrateProgressToS3() {
     console.log('\n📊 Migration Summary:');
     console.log(`   ✅ Successfully migrated: ${successCount} cases`);
     console.log(`   ❌ Failed to migrate: ${errorCount} cases`);
-    console.log(`   📍 S3 Bucket: ${S3_PROGRESS_BUCKET}`);
+    console.log(`    S3 Bucket: ${S3_PROGRESS_BUCKET}`);
     console.log(`   📁 S3 Path: progress/{caseId}.json`);
     
     if (successCount > 0) {

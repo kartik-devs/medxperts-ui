@@ -16,6 +16,7 @@ import OperationsDashboard from './pages/Dashboard/OperationsDashboard';
 import Footer from './components/Footer';
 import AWSConfigChecker from './components/AWSConfigChecker';
 import MCPProgressPage from './pages/Dashboard/MCPProgresspage';
+import LCPProgressPage from './pages/Dashboard/LCPProgresspage';
 
 
 
@@ -38,6 +39,7 @@ function App() {
               <Route path="/medicalcostprojection" element={<MedicalCostProjection />} />
               <Route path="/costprojection" element={<CostProjection />} />
               <Route path="/mcp-progress" element={<MCPProgressPage />} />
+              <Route path="/lcp-progress" element={<LCPProgressPage />} />
 
 
               <Route

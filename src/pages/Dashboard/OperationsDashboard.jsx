@@ -172,10 +172,9 @@ const SearchCaseSection = () => {
 
   // Navigate to case details (you can customize this based on your routing)
   const viewCaseDetails = (caseId) => {
-    // You can navigate to a specific case details page
-    // For now, I'll navigate to the MCP progress page as an example
-    localStorage.setItem('mcp_case_id', caseId);
-    navigate('/mcp-progress');
+    // Always use backend data now - no more localStorage dependency
+    // The backend will automatically determine if it's MCP or LCP from S3 structure
+    navigate(`/mcp-progress?caseId=${caseId}`);
   };
 
   // PDF Viewer functions
@@ -540,6 +539,39 @@ const OperationsDashboard = () => {
   const [loading, setLoading] = useState(true);
   const [recentActivity, setRecentActivity] = useState([]);
   const [statsError, setStatsError] = useState(null);
+  const [activeLcpCases, setActiveLcpCases] = useState([]);
+  const [activeMcpCases, setActiveMcpCases] = useState([]);
+
+  // Check for active MCP cases that were triggered through workflow
+  const checkActiveMcpCases = () => {
+    const mcpCases = [];
+    
+    // First check if there's a current active MCP case
+    const currentMcpCaseId = localStorage.getItem('mcp_case_id');
+    if (currentMcpCaseId) {
+      // For MCP, we need to check backend progress or localStorage progress
+      // Since MCP uses backend progress tracking, we'll mark it as active if it exists
+      mcpCases.push({
+        caseId: currentMcpCaseId,
+        progress: 0, // Will be updated from backend
+        step: 'Processing',
+        status: 'PROCESSING',
+        isActive: true
+      });
+    }
+    
+    setActiveMcpCases(mcpCases);
+    return mcpCases;
+  };
+
+  // Check for active LCP cases that were triggered through workflow
+  const checkActiveLcpCases = () => {
+    // LCP cases are now stored in backend/S3, so we get them from dashboard stats
+    // This function will be updated to use backend data instead of localStorage
+    // For now, return empty array and let dashboard stats handle it
+    setActiveLcpCases([]);
+    return [];
+  };
 
   // Fetch dashboard statistics from backend
   const fetchDashboardStats = async () => {
@@ -602,9 +634,15 @@ const OperationsDashboard = () => {
   // Fetch stats on mount and refresh periodically
   React.useEffect(() => {
     fetchDashboardStats();
+    checkActiveLcpCases(); // Check for LCP cases on mount
+    checkActiveMcpCases(); // Check for MCP cases on mount
 
     // Refresh stats every 30 seconds
-    const interval = setInterval(fetchDashboardStats, 30000);
+    const interval = setInterval(() => {
+      fetchDashboardStats();
+      checkActiveLcpCases(); // Also check LCP cases periodically
+      checkActiveMcpCases(); // Also check MCP cases periodically
+    }, 30000);
 
     return () => clearInterval(interval);
   }, []);
@@ -653,9 +691,44 @@ const OperationsDashboard = () => {
     },
   ];
 
-  const handleCaseClick = (caseId) => {
-    localStorage.setItem('mcp_case_id', caseId);
-    navigate('/mcp-progress');
+  const handleCaseClick = (caseId, caseType = null) => {
+    // Detect case type if not provided
+    let detectedType = caseType;
+    
+    if (!detectedType) {
+      // Check if this case has LCP progress in localStorage
+      const lcpProgressKey = `lcpProgress_${caseId}`;
+      const lcpProgress = localStorage.getItem(lcpProgressKey);
+      
+      if (lcpProgress) {
+        try {
+          const parsed = JSON.parse(lcpProgress);
+          // Use stored report type if available
+          if (parsed.reportType === 'LCP' || parsed.reportType === 'LCP_REDACTED') {
+            detectedType = 'LCP';
+          } else if (parsed.reportType === 'MCP') {
+            detectedType = 'MCP';
+          } else {
+            // Fallback to checking if it has LCP workflow structure
+            detectedType = 'LCP';
+          }
+        } catch (error) {
+          console.warn('Failed to parse progress data for case', caseId);
+          detectedType = 'MCP'; // Default fallback
+        }
+      } else {
+        // Default to MCP for backward compatibility
+        detectedType = 'MCP';
+      }
+    }
+    
+    if (detectedType === 'LCP') {
+      localStorage.setItem('lcp_case_id', caseId);
+      navigate('/lcp-progress');
+    } else {
+      localStorage.setItem('mcp_case_id', caseId);
+      navigate('/mcp-progress');
+    }
   };
 
   return (
@@ -804,7 +877,7 @@ const OperationsDashboard = () => {
                         {caseList.map((caseItem, idx) => (
                           <button
                             key={idx}
-                            onClick={() => handleCaseClick(caseItem.caseId)}
+                            onClick={() => handleCaseClick(caseItem.caseId, caseItem.type)}
                             className="w-full text-left p-3 bg-white border border-slate-200 rounded-lg hover:border-blue-400 hover:shadow-sm transition-all group"
                           >
                             <div className="flex items-center justify-between">
@@ -887,8 +960,17 @@ const OperationsDashboard = () => {
                   key={i}
                   className="flex items-center justify-between px-6 py-4 hover:bg-slate-50 transition-colors cursor-pointer"
                   onClick={() => {
-                    localStorage.setItem('mcp_case_id', item.caseId);
-                    navigate('/mcp-progress');
+                    // Check if this case has LCP progress in localStorage
+                    const lcpProgressKey = `lcpProgress_${item.caseId}`;
+                    const lcpProgress = localStorage.getItem(lcpProgressKey);
+                    
+                    if (lcpProgress || item.type === 'LCP') {
+                      localStorage.setItem('lcp_case_id', item.caseId);
+                      navigate('/lcp-progress');
+                    } else {
+                      localStorage.setItem('mcp_case_id', item.caseId);
+                      navigate('/mcp-progress');
+                    }
                   }}
                 >
                   <div>
@@ -943,53 +1025,126 @@ const OperationsDashboard = () => {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-10 items-stretch">
 
           {/* MCP */}
-          <div
-            onClick={() => navigate('/medicalcostprojection')}
-            className="group cursor-pointer"
-          >
+          <div className="group cursor-pointer">
             <div className="h-full min-h-[260px] flex flex-col justify-between bg-gradient-to-br from-green-50 to-emerald-50 border border-green-100 rounded-2xl shadow-lg hover:shadow-2xl transition-all duration-300 hover:scale-[1.02]">
               <div className="p-6">
                 <div className="flex justify-between mb-4">
                   <div className="bg-gradient-to-br from-green-500 to-emerald-600 p-4 rounded-xl">
                     <Stethoscope className="w-7 h-7 text-white" />
                   </div>
-                  <span className="bg-green-100 px-3 py-1 rounded-full text-xs font-semibold text-green-700">
-                    Medical
-                  </span>
+                  <div className="flex flex-col items-end gap-1">
+                    <span className="bg-green-100 px-3 py-1 rounded-full text-xs font-semibold text-green-700">
+                      Medical
+                    </span>
+                    {activeMcpCases.length > 0 && (
+                      <span className="bg-blue-100 px-2 py-0.5 rounded-full text-xs font-semibold text-blue-700">
+                        {activeMcpCases.length} Active
+                      </span>
+                    )}
+                  </div>
                 </div>
                 <h3 className="text-xl font-bold mb-2">MCP Case Processing</h3>
                 <p className="text-sm text-slate-600">
                   Medical Case Processing with comprehensive diagnostic analysis
                 </p>
               </div>
-              <div className="px-6 pb-6 text-green-600 font-semibold text-sm">
-                Start Processing →
+              <div className="px-6 pb-6 space-y-3">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    navigate('/medicalcostprojection');
+                  }}
+                  className="w-full px-4 py-2 bg-gradient-to-r from-green-600 to-emerald-600 text-white rounded-lg hover:from-green-700 hover:to-emerald-700 transition-all duration-200 font-semibold text-sm"
+                >
+                  Start Processing →
+                </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    // Check if there's an active MCP case that was triggered through workflow
+                    const mcpCaseId = localStorage.getItem('mcp_case_id');
+                    
+                    if (mcpCaseId) {
+                      // Navigate to MCP progress page
+                      navigate('/mcp-progress');
+                    } else {
+                      // No workflow-triggered MCP cases found
+                      alert('No active MCP workflow found. Please start a new MCP case and generate a report first.');
+                    }
+                  }}
+                  className={`w-full px-4 py-2 rounded-lg transition-all duration-200 font-semibold text-sm flex items-center justify-center gap-2 ${
+                    activeMcpCases.length > 0
+                      ? 'bg-blue-50 border border-blue-300 text-blue-700 hover:bg-blue-100 hover:border-blue-400'
+                      : 'bg-white border border-green-300 text-green-700 hover:bg-green-50 hover:border-green-400'
+                  }`}
+                >
+                  <Eye size={16} />
+                  {activeMcpCases.length > 0 ? `Show Progress (${activeMcpCases.length})` : 'Show Progress'}
+                </button>
               </div>
             </div>
           </div>
 
           {/* LCP */}
-          <div
-            onClick={() => navigate('/lifecareplan')}
-            className="group cursor-pointer"
-          >
+          <div className="group cursor-pointer">
             <div className="h-full min-h-[260px] flex flex-col justify-between bg-gradient-to-br from-purple-50 to-indigo-50 border border-purple-100 rounded-2xl shadow-lg hover:shadow-2xl transition-all duration-300 hover:scale-[1.02]">
               <div className="p-6">
                 <div className="flex justify-between mb-4">
                   <div className="bg-gradient-to-br from-purple-500 to-indigo-600 p-4 rounded-xl">
                     <Scale className="w-7 h-7 text-white" />
                   </div>
-                  <span className="bg-purple-100 px-3 py-1 rounded-full text-xs font-semibold text-purple-700">
-                    Legal
-                  </span>
+                  <div className="flex flex-col items-end gap-1">
+                    <span className="bg-purple-100 px-3 py-1 rounded-full text-xs font-semibold text-purple-700">
+                      Legal
+                    </span>
+                    {activeLcpCases.length > 0 && (
+                      <span className="bg-green-100 px-2 py-0.5 rounded-full text-xs font-semibold text-green-700">
+                        {activeLcpCases.length} Active
+                      </span>
+                    )}
+                  </div>
                 </div>
                 <h3 className="text-xl font-bold mb-2">New LCP Case</h3>
                 <p className="text-sm text-slate-600">
                   Legal Case Processing with detailed documentation review
                 </p>
               </div>
-              <div className="px-6 pb-6 text-purple-600 font-semibold text-sm">
-                Start Processing →
+              <div className="px-6 pb-6 space-y-3">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    navigate('/lifecareplan');
+                  }}
+                  className="w-full px-4 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-lg hover:from-purple-700 hover:to-indigo-700 transition-all duration-200 font-semibold text-sm"
+                >
+                  Start Processing →
+                </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    // Check if there's an active LCP case from dashboard stats
+                    if (activeLcpCases.length > 0) {
+                      // Use the first active case
+                      const firstCase = activeLcpCases[0];
+                      localStorage.setItem('lcp_case_id', firstCase.caseId);
+                      if (firstCase.generationId) {
+                        localStorage.setItem('lcp_generation_id', firstCase.generationId);
+                      }
+                      navigate('/lcp-progress');
+                    } else {
+                      // No active LCP cases found
+                      alert('No active LCP workflow found. Please start a new LCP case and generate a report first.');
+                    }
+                  }}
+                  className={`w-full px-4 py-2 rounded-lg transition-all duration-200 font-semibold text-sm flex items-center justify-center gap-2 ${
+                    activeLcpCases.length > 0
+                      ? 'bg-green-50 border border-green-300 text-green-700 hover:bg-green-100 hover:border-green-400'
+                      : 'bg-white border border-purple-300 text-purple-700 hover:bg-purple-50 hover:border-purple-400'
+                  }`}
+                >
+                  <Eye size={16} />
+                  {activeLcpCases.length > 0 ? `Show Progress (${activeLcpCases.length})` : 'Show Progress'}
+                </button>
               </div>
             </div>
           </div>

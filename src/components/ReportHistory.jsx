@@ -145,6 +145,8 @@ const ReportHistory = () => {
       // Validate report data structure
       const validatedReports = newReports.map(report => ({
         caseId: report.caseId || 'Unknown',
+        generationId: report.generationId || null,
+        uniqueKey: report.uniqueKey || `${report.caseId}_${Date.now()}`,
         title: report.title || 'Untitled Report',
         type: report.type || 'MCP',
         status: report.status || 'Pending',
@@ -154,8 +156,10 @@ const ReportHistory = () => {
         progress: Math.max(0, Math.min(100, report.progress || 0)),
         step: report.step || 'Unknown',
         userEmail: report.userEmail || userEmail,
+        isLegacy: report.isLegacy || false,
         // Add metadata for better tracking
         lastUpdated: report.lastUpdated || Date.now(),
+        lastModified: report.lastModified || new Date(),
         isStale: false,
       }));
 
@@ -168,9 +172,9 @@ const ReportHistory = () => {
       const pending = new Set();
       validatedReports.forEach(report => {
         if (report.status === 'Processing') {
-          processing.add(report.caseId);
+          processing.add(report.uniqueKey || report.caseId);
         } else if (report.status === 'Pending') {
-          pending.add(report.caseId);
+          pending.add(report.uniqueKey || report.caseId);
         }
       });
       setProcessingReports(processing);
@@ -342,7 +346,8 @@ const ReportHistory = () => {
         report.caseId.toLowerCase().includes(searchQuery.toLowerCase()) ||
         report.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
         report.type.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        report.step.toLowerCase().includes(searchQuery.toLowerCase());
+        report.step.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (report.generationId && report.generationId.toLowerCase().includes(searchQuery.toLowerCase()));
       
       const matchesStatus = statusFilter === 'All Status' || report.status === statusFilter;
       const matchesType = typeFilter === 'All Types' || report.type === typeFilter;
@@ -351,24 +356,64 @@ const ReportHistory = () => {
     })
     .sort((a, b) => {
       if (sortBy === 'Newest First') {
-        return new Date(b.createdDate) - new Date(a.createdDate);
+        const dateA = new Date(a.createdDate);
+        const dateB = new Date(b.createdDate);
+        
+        if (dateA.getTime() === dateB.getTime()) {
+          // If same creation date, sort by last modified
+          return new Date(b.lastModified || b.lastUpdated) - new Date(a.lastModified || a.lastUpdated);
+        }
+        
+        return dateB - dateA;
       } else if (sortBy === 'Oldest First') {
-        return new Date(a.createdDate) - new Date(b.createdDate);
+        const dateA = new Date(a.createdDate);
+        const dateB = new Date(b.createdDate);
+        
+        if (dateA.getTime() === dateB.getTime()) {
+          // If same creation date, sort by last modified
+          return new Date(a.lastModified || a.lastUpdated) - new Date(b.lastModified || b.lastUpdated);
+        }
+        
+        return dateA - dateB;
       } else if (sortBy === 'Status') {
         const statusOrder = { 'Processing': 0, 'Failed': 1, 'Generated': 2, 'Pending': 3 };
         return (statusOrder[a.status] || 4) - (statusOrder[b.status] || 4);
+      } else if (sortBy === 'Case ID') {
+        const caseCompare = a.caseId.localeCompare(b.caseId);
+        if (caseCompare === 0) {
+          // Same case ID, sort by generation (newest first)
+          return new Date(b.createdDate) - new Date(a.createdDate);
+        }
+        return caseCompare;
       }
       return 0;
     });
 
   // Enhanced action handlers
   const handleViewReport = useCallback((report) => {
-    console.log('👁️ View report action:', report.caseId, report.status);
+    console.log('👁️ View report action:', report.caseId, report.status, report.type);
     
     if (report.status === 'Processing') {
-      // Go to MCP progress page to see live progress
-      localStorage.setItem('mcp_case_id', report.caseId);
-      navigate('/mcp-progress');
+      // Go to appropriate progress page based on report type
+      if (report.type === 'LCP') {
+        localStorage.setItem('lcp_case_id', report.caseId);
+        if (report.generationId) {
+          localStorage.setItem('lcp_generation_id', report.generationId);
+        }
+        if (report.uniqueKey) {
+          localStorage.setItem('lcp_unique_key', report.uniqueKey);
+        }
+        navigate('/lcp-progress');
+      } else {
+        localStorage.setItem('mcp_case_id', report.caseId);
+        if (report.generationId) {
+          localStorage.setItem('mcp_generation_id', report.generationId);
+        }
+        if (report.uniqueKey) {
+          localStorage.setItem('mcp_unique_key', report.uniqueKey);
+        }
+        navigate('/mcp-progress');
+      }
       return;
     }
     
@@ -384,15 +429,37 @@ const ReportHistory = () => {
     }
     
     if (report.status === 'Failed') {
-      // Go to MCP progress page to see error details
-      localStorage.setItem('mcp_case_id', report.caseId);
-      navigate('/mcp-progress');
+      // Go to appropriate progress page based on report type
+      if (report.type === 'LCP') {
+        localStorage.setItem('lcp_case_id', report.caseId);
+        if (report.generationId) {
+          localStorage.setItem('lcp_generation_id', report.generationId);
+        }
+        if (report.uniqueKey) {
+          localStorage.setItem('lcp_unique_key', report.uniqueKey);
+        }
+        navigate('/lcp-progress');
+      } else {
+        localStorage.setItem('mcp_case_id', report.caseId);
+        if (report.generationId) {
+          localStorage.setItem('mcp_generation_id', report.generationId);
+        }
+        if (report.uniqueKey) {
+          localStorage.setItem('mcp_unique_key', report.uniqueKey);
+        }
+        navigate('/mcp-progress');
+      }
       return;
     }
     
-    // Default: go to generation page
-    localStorage.setItem('mcp_case_id', report.caseId);
-    navigate('/medicalcostprojection');
+    // Default: go to appropriate generation page based on report type
+    if (report.type === 'LCP') {
+      localStorage.setItem('lcp_case_id', report.caseId);
+      navigate('/lifecareplan');
+    } else {
+      localStorage.setItem('mcp_case_id', report.caseId);
+      navigate('/medicalcostprojection');
+    }
   }, [navigate]);
 
   const handleDownloadReport = useCallback((report) => {
@@ -419,9 +486,20 @@ const ReportHistory = () => {
   }, []);
 
   const handleRetry = useCallback((report) => {
-    console.log('🔄 Retry action:', report.caseId);
-    localStorage.setItem('mcp_case_id', report.caseId);
-    navigate('/medicalcostprojection');
+    console.log('🔄 Retry action:', report.caseId, report.type);
+    
+    // Clear any existing generation tracking to start fresh
+    if (report.type === 'LCP') {
+      localStorage.removeItem('lcp_generation_id');
+      localStorage.removeItem('lcp_unique_key');
+      localStorage.setItem('lcp_case_id', report.caseId);
+      navigate('/lifecareplan');
+    } else {
+      localStorage.removeItem('mcp_generation_id');
+      localStorage.removeItem('mcp_unique_key');
+      localStorage.setItem('mcp_case_id', report.caseId);
+      navigate('/medicalcostprojection');
+    }
   }, [navigate]);
 
   // Enhanced status badge with more visual feedback
@@ -581,6 +659,11 @@ const ReportHistory = () => {
                 All complete
               </span>
             )}
+            {reports.length > 0 && (
+              <span className="px-2 py-1 bg-slate-100 text-slate-600 text-xs rounded-full">
+                {new Set(reports.map(r => r.caseId)).size} unique cases
+              </span>
+            )}
           </div>
         </div>
         <div className="flex items-center gap-3">
@@ -678,6 +761,7 @@ const ReportHistory = () => {
                 <option>Newest First</option>
                 <option>Oldest First</option>
                 <option>Status</option>
+                <option>Case ID</option>
               </select>
             </div>
           </div>
@@ -699,13 +783,25 @@ const ReportHistory = () => {
           </thead>
           <tbody className="bg-white divide-y divide-slate-200">
             {filteredReports.map((report, index) => (
-              <tr key={`${report.caseId}-${index}`} className="hover:bg-slate-50 transition-colors">
+              <tr key={report.uniqueKey || `${report.caseId}-${report.generationId || index}`} className="hover:bg-slate-50 transition-colors">
                 <td className="px-6 py-4 whitespace-nowrap font-mono text-blue-600 font-medium">
-                  {report.caseId}
+                  <div className="flex flex-col">
+                    <span>{report.caseId}</span>
+                    {report.generationId && (
+                      <span className="text-xs text-slate-400 font-normal">
+                        Gen: {report.generationId.replace('gen_', '').substring(0, 8)}...
+                      </span>
+                    )}
+                  </div>
                 </td>
                 <td className="px-6 py-4">
                   <div className="font-medium text-slate-900">{report.title}</div>
-                  <div className="text-xs text-slate-500">{report.type}</div>
+                  <div className="text-xs text-slate-500 flex items-center gap-2">
+                    <span>{report.type}</span>
+                    {report.isLegacy && (
+                      <span className="px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded text-xs">Legacy</span>
+                    )}
+                  </div>
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-900">
                   {report.createdDate}

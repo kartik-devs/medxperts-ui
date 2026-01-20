@@ -234,25 +234,81 @@ const handleUpload = async () => {
 
     try {
       setReportStatus('PROCESSING');
-      localStorage.setItem('lcp_case_id', selectedCaseId);
-
-      const lcpGenerateUrl = import.meta.env.VITE_N8N_WEBHOOK_URL_LCP_GENERATE ;
-
-      await fetch(lcpGenerateUrl, {
+      
+      // Call backend LCP generate endpoint for AWS S3 storage
+      const API_BASE = import.meta.env.VITE_API_BASE_URL || 
+                       import.meta.env.VITE_API_BASE_URL_PRODUCTION || 
+                       'https://medxperts-ui.onrender.com';
+      
+      console.log('🚀 Triggering LCP workflow via backend for case:', selectedCaseId);
+      
+      const response = await fetch(`${API_BASE}/api/lcp-generate`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'x-user-email': localStorage.getItem('userEmail') || 'anonymous@example.com'
+        },
         body: JSON.stringify({
           caseId: selectedCaseId,
           patientName: '', // Patient name removed from UI
-          reportType: 'LCP_REDACTED', // Added to identify the report type
+          reportType: 'LCP'
         }),
       });
 
+      if (!response.ok) {
+        // If backend endpoint doesn't exist, fall back to direct n8n call
+        if (response.status === 404) {
+          console.log('⚠️ Backend endpoint not found, falling back to direct n8n call');
+          
+          // Clear any existing generation tracking to start fresh
+          localStorage.removeItem('lcp_generation_id');
+          localStorage.removeItem('lcp_unique_key');
+          
+          // Store case ID for progress tracking
+          localStorage.setItem('lcp_case_id', selectedCaseId);
+          
+          // Directly call n8n webhook as fallback
+          const lcpWebhookUrl = 'https://n8n.datakernels.in/webhook/6ca9a42a-3739-482b-a161-30ec56f2e086';
+          
+          await fetch(lcpWebhookUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              caseId: selectedCaseId,
+              case_id: selectedCaseId,
+              patientName: '',
+              reportType: 'LCP',
+              timestamp: new Date().toISOString()
+            }),
+          });
+
+          console.log('✅ LCP workflow triggered via fallback n8n call');
+          navigate('/lcp-progress');
+          return;
+        }
+        
+        throw new Error(`Backend error: ${response.status} - ${response.statusText}`);
+      }
+
+      const result = await response.json();
+      console.log('✅ LCP workflow triggered successfully via backend:', result);
+      
+      // Store the generation info for progress tracking
+      localStorage.setItem('lcp_case_id', selectedCaseId);
+      if (result.generationId) {
+        localStorage.setItem('lcp_generation_id', result.generationId);
+        console.log('💾 Stored LCP generation ID:', result.generationId);
+      }
+      if (result.uniqueKey) {
+        localStorage.setItem('lcp_unique_key', result.uniqueKey);
+        console.log('💾 Stored LCP unique key:', result.uniqueKey);
+      }
+      
       navigate('/lcp-progress');
     } catch (err) {
-      console.error(err);
+      console.error('❌ LCP workflow trigger failed:', err);
       setReportStatus('FAILED');
-      alert('Failed to start report generation');
+      alert('Failed to start LCP report generation: ' + err.message);
     }
   };
 
