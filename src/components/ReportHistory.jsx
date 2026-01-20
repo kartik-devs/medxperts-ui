@@ -905,9 +905,6 @@ const ReportHistory = () => {
                   <div className="font-medium text-slate-900">{report.title}</div>
                   <div className="text-xs text-slate-500 flex items-center gap-2">
                     <span>{report.type}</span>
-                    {report.isLegacy && (
-                      <span className="px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded text-xs">Legacy</span>
-                    )}
                   </div>
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-900">
